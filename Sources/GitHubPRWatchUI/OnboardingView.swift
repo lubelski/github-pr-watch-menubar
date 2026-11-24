@@ -202,7 +202,7 @@ public struct OnboardingView: View {
     private var notificationSection: some View {
         HStack(alignment: .top) {
             Image(systemName: "bell").foregroundStyle(.secondary)
-            Text("Banners when CI finishes or a PR needs you.")
+            Text("Banners when CI finishes or a review comes in.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer()

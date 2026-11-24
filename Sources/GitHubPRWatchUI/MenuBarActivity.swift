@@ -2,13 +2,16 @@ import Foundation
 import GitHubPRWatchCore
 import Observation
 
-/// Routes each poll's events: a short label next to the menu bar glyph for a few seconds,
-/// and planned banners through the notifier, both following the user's settings.
+/// Routes each poll's events: the menu bar badge (`changes`), a short label next to the menu
+/// bar glyph for a few seconds, and planned banners through the notifier. The badge turns on
+/// whatever the settings say; the label and banners follow them.
 @MainActor
 @Observable
 public final class MenuBarActivity {
     /// Shown next to the glyph, such as `#1293 ready to merge`. `nil` most of the time.
     public private(set) var transientLabel: String?
+    /// "Something changed since you last looked", and what changed. In memory only.
+    public private(set) var changes = ChangeBadge()
 
     @ObservationIgnored private var clearTask: Task<Void, Never>?
     @ObservationIgnored private let sleep: @Sendable (TimeInterval) async throws -> Void
@@ -21,6 +24,7 @@ public final class MenuBarActivity {
     public func handle(_ events: [PREvent], settings: NotificationSettings, notifier: any Notifier) {
         let plan = NotificationPlanner.plan(events)
         guard !plan.isEmpty else { return }
+        changes.record(events)
         if settings.showMenuBarLabel, let label = NotificationWording.menuBarLabel(for: plan) {
             show(label)
         }
@@ -38,6 +42,12 @@ public final class MenuBarActivity {
             do { try await sleep(duration) } catch { return }
             self?.transientLabel = nil
         }
+    }
+
+    /// The user looked: opened the popover or brought the main window to the front.
+    public func markSeen() {
+        guard changes.isOn else { return }
+        changes.markSeen()
     }
 
     public func clear() {

@@ -11,9 +11,9 @@ import GitHubPRWatchCore
 /// compile it on its own. `MenuBarLabel` chooses the look from the app's state.
 public enum MenuBarIcon {
     public enum Look: Sendable, CaseIterable {
-        /// Watching, nothing is your move.
+        /// Watching, nothing changed since you last looked.
         case calm
-        /// Something is your move: a filled badge beside the mark's top right.
+        /// Something changed since you last looked: a filled badge beside the mark's top right.
         case badged
         /// Offline or signed out: the mark at 40% opacity.
         case dimmed

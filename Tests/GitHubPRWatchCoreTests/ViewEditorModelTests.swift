@@ -36,16 +36,18 @@ import Testing
     }
 
     @Test func laneUsesKnownLanesThenClassifies() {
-        let ready = pr(checks: [check("a")])  // mine, approved, clean, green: your move
-        #expect(Predicate.lane([.yourMove]).evaluate(ready, viewer: me) == true)
-        #expect(Predicate.lane([.waiting]).evaluate(ready, viewer: me) == false)
+        let ready = pr(checks: [check("a")])  // approved, clean, green: ready to merge
+        #expect(Predicate.lane([.readyToMerge]).evaluate(ready, viewer: me) == true)
+        #expect(Predicate.lane([.inReview]).evaluate(ready, viewer: me) == false)
+        // The same for anyone looking.
+        #expect(Predicate.lane([.readyToMerge]).evaluate(ready, viewer: "apark") == true)
         // Known lanes win over classifying again.
-        let context = FilterContext(viewer: me, lanes: [ready.id: .waiting])
-        #expect(Predicate.lane([.waiting]).evaluate(ready, in: context) == true)
+        let context = FilterContext(viewer: me, lanes: [ready.id: .inReview])
+        #expect(Predicate.lane([.inReview]).evaluate(ready, in: context) == true)
         // Without check detail the lane can't be known, unless draft or queued decide it.
-        #expect(Predicate.lane([.yourMove]).evaluate(pr(), viewer: me) == nil)
-        #expect(Predicate.lane([.waiting]).evaluate(pr(draft: true), viewer: me) == true)
-        #expect(Predicate.lane([.inMergeQueue]).evaluate(pr(queue: MergeQueueEntry(position: 0)), viewer: me) == true)
+        #expect(Predicate.lane([.readyToMerge]).evaluate(pr(), viewer: me) == nil)
+        #expect(Predicate.lane([.inReview]).evaluate(pr(draft: true), viewer: me) == true)
+        #expect(Predicate.lane([.mergeQueue]).evaluate(pr(queue: MergeQueueEntry(position: 0)), viewer: me) == true)
     }
 
     @Test func reviewRequestedByTeamSlugInTheList() {
@@ -58,7 +60,7 @@ import Testing
         #expect(Predicate.not(.author(.anyOf(["apark"]))).summary == "not (author is apark)")
         #expect(Predicate.unassigned.summary == "nobody is assigned")
         #expect(Predicate.reviewRequested(.meOrMyTeams).summary == "review requested from me, my teams")
-        #expect(Predicate.lane([.yourMove]).summary == "lane is Your move")
+        #expect(Predicate.lane([.failing, .readyToMerge]).summary == "lane is Failing or Ready to merge")
     }
 }
 
@@ -112,12 +114,12 @@ import Testing
         #expect(Predicate.reviewRequested(.meOrMyTeams).evaluate(byName, in: FilterContext(viewer: me)) == true)
     }
 
-    @Test func classifierCountsTeamRequestsAsYourMove() {
+    @Test func classifierSaysTeamRequestsAreToYouWithoutMovingTheLane() {
         let without = PRClassifier.classify(teamPR, viewer: me)
-        #expect(without.lane == .waiting)
+        #expect(without.status.kind != .reviewRequestedFromYou)
         let with = PRClassifier.classify(teamPR, viewer: me, context: ClassificationContext(viewerTeams: ["acme/platform"]))
         #expect(with.status.kind == .reviewRequestedFromYou)
-        #expect(with.lane == .yourMove)
+        #expect(with.lane == without.lane)
         // Your own PR requesting your team is not a request to you.
         var mine = teamPR
         mine.author = me
@@ -187,13 +189,15 @@ import Testing
 @Suite struct StoreTeamTests {
     let config = AppConfig(authMethod: .githubCLI, viewer: SampleData.viewer, watchedRepos: ["acme/web", "acme/api"], onboardingComplete: true)
 
-    @Test func teamRequestsBecomeYourMoveWhenTeamsAreReadable() async {
+    @Test func teamRequestsReadAsToYouWhenTeamsAreReadable() async {
         let s = PRStore(dependencies: .inMemory(api: StaticGitHubAPI(teams: ["acme/platform"]), config: config, views: SampleData.views))
         await s.refresh()
         #expect(s.teamAccess == .available)
         #expect(s.viewerTeams == ["acme/platform"])
         let watch = s.pullRequests.first { $0.id == "PR_watch" }
-        #expect(watch?.info.lane == .yourMove)
+        #expect(watch?.info.status.kind == .reviewRequestedFromYou)
+        // The card says so; the lane stays what GitHub reports (its build is still running).
+        #expect(watch?.info.lane == .ciRunning)
         let review = SavedView(name: "R", rule: FilterRule(match: .all, [.predicate(.reviewRequested(.meOrMyTeams))]))
         #expect(s.preview(review.rule).matches.map(\.id).contains("PR_watch"))
     }
@@ -337,8 +341,8 @@ actor FailingTeamsAPI: GitHubAPI {
             RuleRowDraft(field: .ci, op: .isNot, values: ["noChecks"]),
             RuleRowDraft(field: .mergeState, op: .is, values: ["clean", "inQueue"]),
             RuleRowDraft(field: .mergeState, op: .isNot, values: ["conflicts"]),
-            RuleRowDraft(field: .lane, op: .is, values: ["yourMove"]),
-            RuleRowDraft(field: .lane, op: .isNot, values: ["waiting"]),
+            RuleRowDraft(field: .lane, op: .is, values: ["failing", "readyToMerge"]),
+            RuleRowDraft(field: .lane, op: .isNot, values: ["inReview"]),
             RuleRowDraft(field: .title, op: .contains, text: "deps"),
             RuleRowDraft(field: .title, op: .doesNotContain, text: "wip"),
             RuleRowDraft(field: .baseBranch, op: .is, values: ["main"]),
@@ -568,7 +572,7 @@ actor FailingTeamsAPI: GitHubAPI {
     @Test func newPredicatesRoundTrip() throws {
         let rule = FilterRule(match: .all, [
             .predicate(.not(.label(["wip"]))), .predicate(.unassigned), .predicate(.titleContains("deps")),
-            .predicate(.baseBranch(["main"])), .predicate(.lane([.yourMove])), .predicate(.reviewRequested(.meOrMyTeams)),
+            .predicate(.baseBranch(["main"])), .predicate(.lane([.ciRunning, .mergeQueue])), .predicate(.reviewRequested(.meOrMyTeams)),
         ])
         let view = SavedView(name: "New", rule: rule, notify: [.newMatch])
         let back = try JSONDecoder().decode(SavedView.self, from: JSONEncoder().encode(view))

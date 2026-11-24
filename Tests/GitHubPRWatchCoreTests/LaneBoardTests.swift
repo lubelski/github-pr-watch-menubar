@@ -48,61 +48,69 @@ import Testing
         #expect(edge["A"] == minutes(-15))
     }
 
-    @Test func movedNoteOnlyForYourMoveAndShortWindow() {
+    @Test func movedNoteNamesTheDestinationLane() {
         let ready = item(pr("A", number: 7))
+        let failing = item(pr("C", number: 9, checks: [check("lint", .failed)]))
         let running = item(pr("B", number: 8, checks: [check("ci", .running)]))
-        let notes = LaneBoard.movedNotes(justFinished: ["A": minutes(-1), "B": minutes(-1)], board: [ready, running], now: t0)
-        #expect(notes.map(\.shortRef) == ["#7"])
+        let finished = ["A": minutes(-1), "B": minutes(-1), "C": minutes(-0.5)]
+        let notes = LaneBoard.movedNotes(justFinished: finished, board: [ready, running, failing], now: t0)
+        #expect(notes.map(\.shortRef) == ["#9", "#7"])
+        #expect(notes.map(\.lane) == [.failing, .readyToMerge])
+        #expect(notes.map(\.destinationText) == ["moved to Failing", "moved to Ready to merge"])
         #expect(LaneBoard.movedNotes(justFinished: ["A": minutes(-5)], board: [ready], now: t0).isEmpty)
     }
 
     // MARK: Order
 
-    @Test func yourMoveJustFinishedFirstThenNewest() {
-        let old = item(updated(pr("old", number: 1), -60))
-        let new = item(updated(pr("new", number: 2), -2))
-        let finished = item(updated(pr("fin", number: 3), -90))
-        let sorted = LaneBoard.sorted([old, new, finished], in: .yourMove, justFinished: ["fin": minutes(-1)], now: t0)
-        #expect(sorted.map(\.id) == ["fin", "new", "old"])
+    @Test func justFinishedFirstThenNewestInEveryFinishedLane() {
+        let old = updated(pr("old", number: 1), -60)
+        let new = updated(pr("new", number: 2), -2)
+        let finished = updated(pr("fin", number: 3), -90)
+        for lane in [Lane.failing, .inReview, .readyToMerge] {
+            let sorted = LaneBoard.sorted([old, new, finished].map(item), in: lane, justFinished: ["fin": minutes(-1)])
+            #expect(sorted.map(\.id) == ["fin", "new", "old"], "\(lane)")
+        }
     }
 
     @Test func checkFinishCountsAsAChange() {
         // Updated long ago, but a check failed a minute ago.
         let failed = item(updated(pr("f", number: 1, checks: [check("lint", .failed, start: -30, end: -1)]), -120))
-        let touched = item(updated(pr("t", number: 2), -10))
-        #expect(LaneBoard.sorted([touched, failed], in: .yourMove, now: t0).map(\.id) == ["f", "t"])
+        let other = item(updated(pr("t", number: 2, state: .behind), -10))
+        #expect(LaneBoard.sorted([other, failed], in: .failing).map(\.id) == ["f", "t"])
     }
 
     @Test func ciRunningLongestFirstQueuedLast() {
         let short = item(pr("short", number: 1, checks: [check("ci", .running, start: -5)]))
         let long = item(pr("long", number: 2, checks: [check("ci", .running, start: -50)]))
         let queued = item(pr("queued", number: 3, checks: [CheckRun(name: "ci", status: .queued)]))
-        let sorted = LaneBoard.sorted([queued, short, long], in: .ciRunning, now: t0)
+        let sorted = LaneBoard.sorted([queued, short, long], in: .ciRunning)
         #expect(sorted.map(\.id) == ["long", "short", "queued"])
     }
 
     @Test func queueByPosition() {
         let second = item(pr("2", number: 1, queue: MergeQueueEntry(position: 1)))
         let first = item(pr("1", number: 2, queue: MergeQueueEntry(position: 0)))
-        #expect(LaneBoard.sorted([second, first], in: .inMergeQueue, now: t0).map(\.id) == ["1", "2"])
+        #expect(LaneBoard.sorted([second, first], in: .mergeQueue).map(\.id) == ["1", "2"])
     }
 
-    @Test func waitingDraftsLast() {
+    @Test func inReviewDraftsLast() {
         let draft = item(updated(pr("d", number: 1, draft: true), -1))
         let review = item(updated(pr("r", number: 2, decision: .reviewRequired), -100))
-        #expect(LaneBoard.sorted([draft, review], in: .waiting, now: t0).map(\.id) == ["r", "d"])
+        #expect(draft.info.lane == .inReview)
+        #expect(LaneBoard.sorted([draft, review], in: .inReview).map(\.id) == ["r", "d"])
     }
 
     @Test func tiesAreStable() {
         let b = item(pr("b", repo: "acme/web", number: 2))
         let a = item(pr("a", repo: "acme/web", number: 1))
-        #expect(LaneBoard.sorted([b, a], in: .yourMove, now: t0).map(\.id) == ["a", "b"])
+        #expect(LaneBoard.sorted([b, a], in: .readyToMerge).map(\.id) == ["a", "b"])
     }
 
-    @Test func lanesAlwaysFourInOrder() {
-        let groups = LaneBoard.lanes([item(pr("a"))], now: t0)
-        #expect(groups.map(\.lane) == Lane.allCases)
-        #expect(groups[0].pullRequests.count == 1)
+    @Test func lanesAlwaysFiveInPipelineOrder() {
+        let groups = LaneBoard.lanes([item(pr("a"))])
+        #expect(groups.map(\.lane) == [.ciRunning, .failing, .inReview, .readyToMerge, .mergeQueue])
+        #expect(groups.map(\.lane.title) == ["CI running", "Failing", "In review", "Ready to merge", "Merge queue"])
+        #expect(groups[3].pullRequests.count == 1)
     }
 
     // MARK: Live running time
@@ -172,7 +180,7 @@ import Testing
         #expect(!all.isEmpty)
         #expect(all == union)
         #expect(s.boardPullRequests(for: BuiltInViews.mineID) == s.pullRequests(in: BuiltInViews.mineID))
-        #expect(s.yourMoveCount(for: BuiltInViews.mineID) == s.pullRequests(in: BuiltInViews.mineID).filter { $0.info.lane == .yourMove }.count)
+        #expect(s.openCount(for: BuiltInViews.mineID) == s.pullRequests(in: BuiltInViews.mineID).filter { !$0.pr.isDraft }.count)
         #expect(!s.views.contains { $0.id == PRStore.allViewsID })
     }
 }

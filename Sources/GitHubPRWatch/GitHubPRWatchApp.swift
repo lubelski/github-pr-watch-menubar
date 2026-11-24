@@ -10,7 +10,7 @@ struct GitHubPRWatchApp: App {
 
     var body: some Scene {
         Window(AppInfo.name, id: AppInfo.mainWindowID) {
-            MainWindowView(store: services.store, notifier: services.notifier)
+            MainWindowView(store: services.store, notifier: services.notifier, activity: services.activity)
         }
         .defaultSize(width: 1100, height: 680)
         // The title row above the toolbar row, so the centered app name has a row of its own.
@@ -18,7 +18,7 @@ struct GitHubPRWatchApp: App {
         .defaultLaunchBehavior(services.store.needsOnboarding ? .presented : .suppressed)
 
         MenuBarExtra {
-            MenuBarPopoverView(store: services.store)
+            MenuBarPopoverView(store: services.store, activity: services.activity)
         } label: {
             MenuBarItemLabel(services: services)
         }

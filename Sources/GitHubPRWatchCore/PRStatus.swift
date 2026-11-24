@@ -1,21 +1,50 @@
 import Foundation
 
-/// The four lanes of the main window, in display order.
+/// The five lanes of the main window, in pipeline order. A lane is a fact GitHub reports
+/// about the PR, the same for every viewer.
 public enum Lane: String, Codable, Sendable, CaseIterable, Identifiable {
-    case yourMove
+    /// Checks are in progress.
     case ciRunning
-    case inMergeQueue
-    case waiting
+    /// Something must change before it can merge: a failed check, merge conflicts, behind
+    /// its base, a guard check, branch protection, or a drop from the merge queue.
+    case failing
+    /// Checks passed (or there are none) and it waits on a review, or changes were requested.
+    /// Drafts sit here too, in a collapsed group.
+    case inReview
+    /// Checks passed, approved, nothing blocks the merge.
+    case readyToMerge
+    /// In a merge queue.
+    case mergeQueue
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
-        case .yourMove: "Your move"
         case .ciRunning: "CI running"
-        case .inMergeQueue: "In merge queue"
-        case .waiting: "Waiting on others"
+        case .failing: "Failing"
+        case .inReview: "In review"
+        case .readyToMerge: "Ready to merge"
+        case .mergeQueue: "Merge queue"
         }
+    }
+
+    /// A lane name, including one saved by an older build, mapped to the nearest lane today.
+    /// `nil` for a name with no equivalent, such as the old first lane, which depended on who
+    /// was looking. See `LegacyLaneMigration`.
+    public static func migrating(_ raw: String) -> Lane? {
+        switch raw {
+        case "inMergeQueue": .mergeQueue
+        case "waiting": .inReview
+        default: Lane(rawValue: raw)
+        }
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        guard let lane = Self.migrating(raw) else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Unknown lane \(raw)"))
+        }
+        self = lane
     }
 }
 
@@ -89,7 +118,7 @@ public enum PRStatus: Codable, Sendable, Equatable, Hashable {
     }
 }
 
-/// A PR's status, its lane for this viewer, and the two lines of text a row shows.
+/// A PR's status, its lane, and the two lines of text a row shows.
 public struct StatusInfo: Codable, Sendable, Equatable, Hashable {
     public var status: PRStatus
     public var lane: Lane
@@ -147,38 +176,65 @@ public struct ClassificationContext: Sendable {
 
 /// Turns a PR into a status, a lane, and a sentence.
 ///
-/// "Owner" means the viewer authored the PR or is assigned to it, so an agent's PR
-/// assigned to you is yours to shepherd. Rows are tried in order; the first match wins.
+/// The status is what the card says. The lane is the lane of that status, so a card always
+/// sits in the lane its sentence describes. Rows are tried in order; the first match wins.
 ///
-/// | #  | Condition                                                    | Status                         | Owner's lane   | Anyone else's lane |
-/// |----|--------------------------------------------------------------|--------------------------------|----------------|--------------------|
-/// | 1  | Draft                                                        | draft                          | waiting        | waiting            |
-/// | 2  | Has a merge queue entry                                      | inMergeQueue                   | inMergeQueue   | inMergeQueue       |
-/// | 3  | Dropped from the queue, same head commit as when it dropped  | droppedFromMergeQueue          | yourMove       | waiting            |
-/// | 4  | Review requested from the viewer or a team of theirs (not author) | reviewRequestedFromYou    | yourMove       | yourMove           |
-/// | 5  | Mergeable is CONFLICTING or merge state is DIRTY             | mergeConflicts                 | yourMove       | waiting            |
-/// | 6  | A check other than a guard failed                            | ciFailed                       | yourMove       | waiting            |
-/// | 7  | A check is still running                                     | ciRunning                      | ciRunning      | ciRunning          |
-/// | 8  | Review decision is CHANGES_REQUESTED                         | changesRequested               | yourMove       | waiting            |
-/// | 9  | Only guard checks failed                                     | greenBlocked(.requiredCheck)   | yourMove       | waiting            |
-/// | 10 | Merge state is BEHIND                                        | greenBlocked(.behindBase)      | yourMove       | waiting            |
-/// | 11 | Review decision is REVIEW_REQUIRED                           | waitingOnReview                | waiting        | waiting            |
-/// | 12 | Merge state or mergeable is UNKNOWN                          | checkingMergeability           | waiting        | waiting            |
-/// | 13 | Merge state is BLOCKED                                       | greenBlocked(.branchProtection)| yourMove       | waiting            |
-/// | 14 | Otherwise (CLEAN, HAS_HOOKS, UNSTABLE)                       | readyToMerge                   | yourMove       | waiting            |
+/// | #  | Condition                                                         | Status                          | Lane            |
+/// |----|-------------------------------------------------------------------|---------------------------------|-----------------|
+/// | 1  | Draft                                                             | draft                           | inReview (Drafts group) |
+/// | 2  | Has a merge queue entry                                           | inMergeQueue                    | mergeQueue      |
+/// | 3  | Dropped from the queue, same head commit as when it dropped       | droppedFromMergeQueue           | failing         |
+/// | 4  | Review requested from the viewer or a team of theirs (not author) | reviewRequestedFromYou          | the lane rows 5–14 give |
+/// | 5  | Mergeable is CONFLICTING or merge state is DIRTY                  | mergeConflicts                  | failing         |
+/// | 6  | A check other than a guard failed                                 | ciFailed                        | failing         |
+/// | 7  | A check is still running                                          | ciRunning                       | ciRunning       |
+/// | 8  | Review decision is CHANGES_REQUESTED                              | changesRequested                | inReview        |
+/// | 9  | Only guard checks failed                                          | greenBlocked(.requiredCheck)    | failing         |
+/// | 10 | Merge state is BEHIND                                             | greenBlocked(.behindBase)       | failing         |
+/// | 11 | Review decision is REVIEW_REQUIRED                                | waitingOnReview                 | inReview        |
+/// | 12 | Merge state or mergeable is UNKNOWN                               | checkingMergeability            | inReview        |
+/// | 13 | Merge state is BLOCKED                                            | greenBlocked(.branchProtection) | failing         |
+/// | 14 | Otherwise (CLEAN, HAS_HOOKS, UNSTABLE)                            | readyToMerge                    | readyToMerge    |
+///
+/// So when a PR fits two lanes: merge queue, then a hard failure (dropped from the queue,
+/// conflicts, a failed check, which GitHub's own rollup already reports as failed while other
+/// checks run), then CI running, then changes requested, then a soft block (a guard check,
+/// behind base), then waiting on review, then branch protection, then ready to merge.
+///
+/// Row 4 is the only one that depends on who is looking, and it changes only the card's
+/// sentence: the lane never depends on the viewer. `classify(_:context:)` skips it.
 ///
 /// Rows 6, 7 and 9 need check detail for the current head commit. Without it they are
 /// skipped, and GitHub's merge state decides.
 public enum PRClassifier {
+    /// The status and lane as GitHub reports them, then row 4 for this viewer.
     public static func classify(_ pr: PullRequest, viewer: String, context: ClassificationContext = .init()) -> StatusInfo {
-        let isOwner = pr.isAuthored(by: viewer) || pr.isAssigned(to: viewer)
-        let ownerLane: Lane = isOwner ? .yourMove : .waiting
+        let base = classify(pr, context: context)
+        switch base.status.kind {
+        case .draft, .inMergeQueue, .droppedFromMergeQueue:
+            return base
+        default:
+            break
+        }
+        // 4
+        if pr.requestsReview(from: viewer, orTeams: context.viewerTeams), !pr.isAuthored(by: viewer) {
+            let who = pr.author ?? "Someone"
+            return info(
+                .reviewRequestedFromYou(author: pr.author), base.lane,
+                "Review requested from you", "\(who) · \(Formatting.ago(pr.updatedAt, now: context.now))"
+            )
+        }
+        return base
+    }
+
+    /// The status and lane without a viewer: every row but 4.
+    public static func classify(_ pr: PullRequest, context: ClassificationContext = .init()) -> StatusInfo {
         let checks = pr.currentChecks
         let now = context.now
 
         // 1
         if pr.isDraft {
-            return info(.draft, .waiting, "Draft", "Not ready for review yet")
+            return info(.draft, .inReview, "Draft", "Not ready for review yet")
         }
         // 2
         if let entry = pr.mergeQueueEntry {
@@ -193,7 +249,7 @@ public enum PRClassifier {
             }
             return info(
                 .inMergeQueue(position: position, of: entry.queueLength, state: entry.state, estimatedSeconds: entry.estimatedTimeToMerge),
-                .inMergeQueue, headline, detail
+                .mergeQueue, headline, detail
             )
         }
         // 3
@@ -201,16 +257,11 @@ public enum PRClassifier {
             var parts: [String] = []
             if let reason = drop.reason, !reason.isEmpty { parts.append(Formatting.humanize(reason).capitalizedFirst) }
             parts.append(Formatting.ago(drop.at, now: now))
-            return info(.droppedFromMergeQueue(reason: drop.reason, at: drop.at), ownerLane, "Dropped from merge queue", parts.joined(separator: " · "))
-        }
-        // 4
-        if pr.requestsReview(from: viewer, orTeams: context.viewerTeams), !pr.isAuthored(by: viewer) {
-            let who = pr.author ?? "Someone"
-            return info(.reviewRequestedFromYou(author: pr.author), .yourMove, "Review requested from you", "\(who) · \(Formatting.ago(pr.updatedAt, now: now))")
+            return info(.droppedFromMergeQueue(reason: drop.reason, at: drop.at), .failing, "Dropped from merge queue", parts.joined(separator: " · "))
         }
         // 5
         if pr.mergeable == .conflicting || pr.mergeStateStatus == .dirty {
-            return info(.mergeConflicts(base: pr.baseRef), ownerLane, "Merge conflicts with \(pr.baseRef)", "Resolve them so CI can run")
+            return info(.mergeConflicts(base: pr.baseRef), .failing, "Merge conflicts with \(pr.baseRef)", "Resolve them so CI can run")
         }
         let failing = checks?.failing ?? []
         let realFailures = failing.filter { !context.isGuard($0) }
@@ -220,7 +271,7 @@ public enum PRClassifier {
             let headline = names.count == 1
                 ? "Check failed: \(names[0])"
                 : "\(names.count) checks failed: \(Formatting.names(names, moreSuffix: ""))"
-            return info(.ciFailed(failing: names, total: checks.checks.count), ownerLane, headline, finishedDetail(checks, now: now))
+            return info(.ciFailed(failing: names, total: checks.checks.count), .failing, headline, finishedDetail(checks, now: now))
         }
         // 7
         if let checks, !checks.running.isEmpty {
@@ -235,33 +286,33 @@ public enum PRClassifier {
             let by = pr.latestReviews.filter { $0.state == .changesRequested }.map(\.author)
             let headline = by.isEmpty ? "Changes requested" : "Changes requested by \(Formatting.names(by, moreSuffix: ""))"
             let when = pr.latestReviews.filter { $0.state == .changesRequested }.compactMap(\.submittedAt).max()
-            return info(.changesRequested(by: by), ownerLane, headline, when.map { Formatting.ago($0, now: now).capitalizedFirst } ?? "")
+            return info(.changesRequested(by: by), .inReview, headline, when.map { Formatting.ago($0, now: now).capitalizedFirst } ?? "")
         }
         // 9
         if !failing.isEmpty {
             let names = failing.map(\.name)
             return info(
-                .greenBlocked(.requiredCheck(names: names)), ownerLane,
+                .greenBlocked(.requiredCheck(names: names)), .failing,
                 "CI passed · blocked by \(Formatting.names(names, moreSuffix: ""))", "Needs a rebase onto \(pr.baseRef)"
             )
         }
         // 10
         if pr.mergeStateStatus == .behind {
-            return info(.greenBlocked(.behindBase(base: pr.baseRef)), ownerLane, "CI passed · blocked: behind \(pr.baseRef)", "Update the branch; CI will run again")
+            return info(.greenBlocked(.behindBase(base: pr.baseRef)), .failing, "CI passed · blocked: behind \(pr.baseRef)", "Update the branch; CI will run again")
         }
         // 11
         if pr.reviewDecision == .reviewRequired {
             let reviewers = pr.reviewRequests.map(\.displayName)
             let detail = reviewers.isEmpty ? "No reviewer requested yet" : Formatting.names(reviewers, limit: 3, moreSuffix: " more")
-            return info(.waitingOnReview(reviewers: reviewers), .waiting, "Waiting on review", detail)
+            return info(.waitingOnReview(reviewers: reviewers), .inReview, "Waiting on review", detail)
         }
         // 12
         if pr.mergeStateStatus == .unknown || pr.mergeable == .unknown {
-            return info(.checkingMergeability, .waiting, "Checking mergeability", "GitHub is still working it out")
+            return info(.checkingMergeability, .inReview, "Checking mergeability", "GitHub is still working it out")
         }
         // 13
         if pr.mergeStateStatus == .blocked {
-            return info(.greenBlocked(.branchProtection), ownerLane, "CI passed · blocked by branch protection", "A rule still blocks the merge")
+            return info(.greenBlocked(.branchProtection), .failing, "CI passed · blocked by branch protection", "A rule still blocks the merge")
         }
         // 14
         var parts: [String] = []
@@ -270,7 +321,7 @@ public enum PRClassifier {
         }
         if pr.reviewDecision == .approved { parts.append("approved") }
         parts.append(pr.autoMergeEnabled ? "auto-merge is on but hasn't merged it" : "no merge queue")
-        return info(.readyToMerge(autoMerge: pr.autoMergeEnabled), ownerLane, "Ready to merge", parts.joined(separator: " · "))
+        return info(.readyToMerge(autoMerge: pr.autoMergeEnabled), .readyToMerge, "Ready to merge", parts.joined(separator: " · "))
     }
 
     /// Classifies a list of PRs.

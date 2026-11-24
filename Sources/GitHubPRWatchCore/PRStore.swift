@@ -53,7 +53,7 @@ public struct PRStoreDependencies: Sendable {
             makeAPI: { GitHubClient(tokens: $0) },
             deviceFlow: OAuthConfig.isDeviceFlowAvailable ? DeviceFlow() : nil,
             config: JSONFileStore<AppConfig>(applicationSupportFile: "config.json"),
-            views: JSONFileStore<[SavedView]>(applicationSupportFile: "views.json"),
+            views: JSONFileStore<[SavedView]>(applicationSupportFile: "views.json", migrate: LegacyLaneMigration.migrate),
             snapshot: JSONFileStore<TransitionSnapshot>(applicationSupportFile: "snapshot.json")
         )
     }
@@ -255,22 +255,14 @@ public final class PRStore {
         ClassificationContext(now: dependencies.now(), guardCheckPatterns: config.guardCheckPatterns, queueDrops: queueDrops, viewerTeams: viewerTeams)
     }
 
-    /// The four lanes for a view, always all four and in order, each sorted for its lane.
+    /// The five lanes for a view, always all five and in order, each sorted for its lane.
     public func lanes(for viewID: UUID?) -> [LaneGroup] {
         Self.lanes(pullRequests(in: viewID))
     }
 
+    /// The five lanes, sorted as `LaneBoard.sorted` describes.
     public static func lanes(_ prs: [ClassifiedPR]) -> [LaneGroup] {
-        Lane.allCases.map { lane in
-            let inLane = prs.filter { $0.info.lane == lane }
-            let sorted: [ClassifiedPR] = switch lane {
-            case .inMergeQueue:
-                inLane.sorted { ($0.pr.mergeQueueEntry?.position ?? .max) < ($1.pr.mergeQueueEntry?.position ?? .max) }
-            default:
-                inLane.sorted { $0.pr.updatedAt > $1.pr.updatedAt }
-            }
-            return LaneGroup(lane: lane, pullRequests: sorted)
-        }
+        LaneBoard.lanes(prs)
     }
 
     /// Views shown in the menubar popover: the pinned ones, or all when none is pinned.
@@ -284,11 +276,6 @@ public final class PRStore {
         guard let context = filterContext else { return [] }
         let menuViews = menuBarViews
         return pullRequests.filter { pr in menuViews.contains { $0.matches(pr.pr, in: context) } }
-    }
-
-    /// The menubar badge: PRs in the menubar views whose lane is "Your move".
-    public var yourMoveCount: Int {
-        menuBarPullRequests.filter { $0.info.lane == .yourMove }.count
     }
 
     // MARK: Sign-in

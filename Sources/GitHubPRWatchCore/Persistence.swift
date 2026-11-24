@@ -13,14 +13,18 @@ public protocol DocumentStore<Document>: Sendable {
 /// A JSON file, written atomically.
 public struct JSONFileStore<Document: Codable & Sendable>: DocumentStore {
     public let url: URL
+    /// Rewrites what an older build saved before it is decoded. The file on disk changes only
+    /// at the next save.
+    public let migrate: (@Sendable (Data) -> Data)?
 
-    public init(url: URL) {
+    public init(url: URL, migrate: (@Sendable (Data) -> Data)? = nil) {
         self.url = url
+        self.migrate = migrate
     }
 
     /// `~/Library/Application Support/GitHub PR Watch/<name>`.
-    public init(applicationSupportFile name: String) {
-        self.init(url: Self.applicationSupportDirectory.appendingPathComponent(name))
+    public init(applicationSupportFile name: String, migrate: (@Sendable (Data) -> Data)? = nil) {
+        self.init(url: Self.applicationSupportDirectory.appendingPathComponent(name), migrate: migrate)
     }
 
     public static var applicationSupportDirectory: URL {
@@ -30,7 +34,8 @@ public struct JSONFileStore<Document: Codable & Sendable>: DocumentStore {
 
     public func load() throws -> Document? {
         guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-        return try JSONCoding.decoder.decode(Document.self, from: Data(contentsOf: url))
+        let data = try Data(contentsOf: url)
+        return try JSONCoding.decoder.decode(Document.self, from: migrate?(data) ?? data)
     }
 
     public func save(_ document: Document) throws {

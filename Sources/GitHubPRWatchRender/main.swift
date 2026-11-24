@@ -130,7 +130,7 @@ allViews.selectedViewID = PRStore.allViewsID
 // Too many views for tabs in a narrow window: the picker becomes one menu.
 let manyViews = PRStore(dependencies: .inMemory(
     api: StaticGitHubAPI(), config: watchingConfig,
-    views: SampleData.views + ["Web team", "API on-call", "Release blockers"].map { SavedView(name: $0, rule: BuiltInViews.mine.rule) }
+    views: SampleData.views + ["Web team", "API on-call", "Release blockers", "Security review"].map { SavedView(name: $0, rule: BuiltInViews.mine.rule) }
 ))
 await manyViews.refresh()
 manyViews.selectedViewID = BuiltInViews.mineID
@@ -143,8 +143,8 @@ for dark in [false, true] {
     let lanes: [(String, PRStore, CGSize)] = [
         ("lanes-mine", watching, CGSize(width: 1100, height: 680)),
         ("lanes-just-finished", justFinished, CGSize(width: 1100, height: 680)),
-        ("lanes-narrow", watching, CGSize(width: 900, height: 620)),
-        ("lanes-narrow-many-views", manyViews, CGSize(width: 900, height: 560)),
+        ("lanes-narrow", watching, CGSize(width: LanesWindowView.minimumWidth, height: 620)),
+        ("lanes-narrow-many-views", manyViews, CGSize(width: LanesWindowView.minimumWidth, height: 560)),
         ("lanes-all-views", allViews, CGSize(width: 1440, height: 760)),
         ("lanes-empty-view", emptyView, CGSize(width: 1100, height: 600)),
         ("lanes-offline", offline, CGSize(width: 1100, height: 680)),
@@ -166,7 +166,7 @@ for dark in [false, true] {
 try await MenuBarRenders.renderAll(to: outputDirectory)
 // The view editor sheet in each state.
 try await renderViewEditor()
-print("your move: \(watching.yourMoveCount)")
+print("open in Mine: \(watching.openCount(for: BuiltInViews.mineID))")
 
 /// Wraps an API and reports some repos as unreadable, for the "can't read" banner.
 actor PartialAPI: GitHubAPI {
