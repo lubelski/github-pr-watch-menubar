@@ -510,6 +510,7 @@ actor FailingTeamsAPI: GitHubAPI {
         #expect(CIOutcomeChoice.summary(Set(CIOutcomeChoice.kinds)) == "Any outcome")
         #expect(CIOutcomeChoice.summary([.ciFailed]) == "Failed")
         #expect(CIOutcomeChoice.summary([.newMatch]) == "Off")
+        #expect(CIOutcomeChoice.summary([.ciFailed, .ciReady, .newMatch]) == "Failed, Ready")
     }
 }
 

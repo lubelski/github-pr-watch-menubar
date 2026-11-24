@@ -436,7 +436,10 @@ public struct ViewDraft: Equatable, Sendable {
         case .label: "Add a label, or remove the rule."
         case .baseBranch: "Add a branch, or remove the rule."
         case .title: "Type the text the title should contain, or remove the rule."
-        case .ci, .mergeState, .lane, .draft: "Pick at least one \(row.field.title.lowercased()), or remove the rule."
+        case .ci: "Pick at least one CI state, or remove the rule."
+        case .mergeState: "Pick at least one merge state, or remove the rule."
+        case .lane: "Pick at least one lane, or remove the rule."
+        case .draft: "Pick Yes or No, or remove the rule."
         }
     }
 
@@ -583,11 +586,22 @@ public enum CIOutcomeChoice {
         }
     }
 
-    /// `Any outcome`, `Failed`, `Failed or Green and ready`.
+    /// A word for the menu's label.
+    public static func shortTitle(_ kind: EventKind) -> String {
+        switch kind {
+        case .ciFailed: "Failed"
+        case .ciReady: "Ready"
+        case .ciBlocked: "Blocked"
+        case .ciPassed: "Waiting"
+        default: kind.title
+        }
+    }
+
+    /// `Any outcome`, `Failed`, `Failed, Ready`.
     public static func summary(_ notify: Set<EventKind>) -> String {
         let chosen = kinds.filter(notify.contains)
         if chosen.count == kinds.count { return "Any outcome" }
         if chosen.isEmpty { return "Off" }
-        return chosen.map(title).joined(separator: " or ")
+        return chosen.map(shortTitle).joined(separator: ", ")
     }
 }
