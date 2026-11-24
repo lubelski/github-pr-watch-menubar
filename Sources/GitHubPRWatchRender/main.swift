@@ -72,10 +72,81 @@ let watching = PRStore(dependencies: .inMemory(
 await watching.refresh()
 watching.selectedViewID = BuiltInViews.mineID
 
+// The lanes in other states. Each is its own store so the states don't leak.
+let watchingConfig = AppConfig(authMethod: .githubCLI, viewer: SampleData.viewer, watchedRepos: ["acme/web", "acme/api", "acme/infra"], onboardingComplete: true)
+@MainActor func lanesStore(_ api: any GitHubAPI) -> PRStore {
+    let store = PRStore(dependencies: .inMemory(api: api, config: watchingConfig, views: SampleData.views))
+    store.selectedViewID = BuiltInViews.mineID
+    return store
+}
+
+// CI just finished: #4826 was running at the first poll, then finished green and approved.
+let finishingAPI = StaticGitHubAPI()
+let justFinished = lanesStore(finishingAPI)
+await justFinished.refresh()
+await finishingAPI.set(prs: SampleData.pullRequests().map { pr in
+    guard pr.id == "PR_running" else { return pr }
+    var done = pr
+    done.reviewDecision = .approved
+    done.mergeStateStatus = .clean
+    done.updatedAt = Date()
+    let checks = done.checks?.checks ?? []
+    done.checks?.checks = checks.map { check in
+        var check = check
+        check.status = .completed
+        check.conclusion = .success
+        check.completedAt = check.completedAt ?? Date().addingTimeInterval(-20)
+        return check
+    }
+    return done
+})
+await justFinished.refresh()
+
+// Nothing matches the view.
+let emptyView = lanesStore(StaticGitHubAPI(prs: []))
+await emptyView.refresh()
+
+// Offline after a good poll, with one repo GitHub wouldn't let us read.
+let offlineAPI = PartialAPI(base: StaticGitHubAPI(), failedRepos: ["acme/infra"])
+let offline = lanesStore(offlineAPI)
+await offline.refresh()
+await offlineAPI.base.set(error: .offline)
+await offline.refresh()
+
+// Rate limited before the first poll ever finished.
+let limitedAPI = StaticGitHubAPI()
+await limitedAPI.set(error: .rateLimited(resetAt: Date().addingTimeInterval(1800)))
+let rateLimited = lanesStore(limitedAPI)
+await rateLimited.refresh()
+
+// The first fetch hasn't come back yet.
+let loading = lanesStore(StaticGitHubAPI())
+
+// Every view at once.
+let allViews = lanesStore(StaticGitHubAPI())
+await allViews.refresh()
+allViews.selectedViewID = PRStore.allViewsID
+
+// Too many views for tabs in a narrow window: the picker becomes one menu.
+let manyViews = PRStore(dependencies: .inMemory(
+    api: StaticGitHubAPI(), config: watchingConfig,
+    views: SampleData.views + ["Web team", "API on-call", "Release blockers"].map { SavedView(name: $0, rule: BuiltInViews.mine.rule) }
+))
+await manyViews.refresh()
+manyViews.selectedViewID = BuiltInViews.mineID
+
 for dark in [false, true] {
+    try render("lanes-narrow-many-views", LanesWindowView(store: manyViews), size: CGSize(width: 900, height: 480), dark: dark)
     try render("onboarding-signed-out", OnboardingView(store: signedOut, notifier: notifier), size: CGSize(width: 820, height: 560), dark: dark)
     try render("onboarding-signed-in", OnboardingView(store: signedIn, notifier: notifier), size: CGSize(width: 820, height: 560), dark: dark)
-    try render("lanes-mine", LanesWindowView(store: watching), size: CGSize(width: 1100, height: 620), dark: dark)
+    try render("lanes-mine", LanesWindowView(store: watching), size: CGSize(width: 1100, height: 680), dark: dark)
+    try render("lanes-just-finished", LanesWindowView(store: justFinished), size: CGSize(width: 1100, height: 680), dark: dark)
+    try render("lanes-narrow", LanesWindowView(store: watching), size: CGSize(width: 900, height: 620), dark: dark)
+    try render("lanes-all-views", LanesWindowView(store: allViews), size: CGSize(width: 1440, height: 760), dark: dark)
+    try render("lanes-empty-view", LanesWindowView(store: emptyView), size: CGSize(width: 1100, height: 520), dark: dark)
+    try render("lanes-offline", LanesWindowView(store: offline), size: CGSize(width: 1100, height: 680), dark: dark)
+    try render("lanes-rate-limited", LanesWindowView(store: rateLimited), size: CGSize(width: 1100, height: 520), dark: dark)
+    try render("lanes-loading", LanesWindowView(store: loading), size: CGSize(width: 1100, height: 520), dark: dark)
     try render("popover", MenuBarPopoverView(store: watching), dark: dark)
     try render("settings", SettingsView(store: watching, notifier: notifier), size: CGSize(width: 520, height: 460), dark: dark)
 }
@@ -87,3 +158,24 @@ for dark in [false, true] {
 try writeImage(MenuBarLabel.image(count: 0), name: "menubar-idle")
 try writeImage(MenuBarLabel.image(count: 3), name: "menubar-badge")
 print("your move: \(watching.yourMoveCount)")
+
+/// Wraps an API and reports some repos as unreadable, for the "can't read" banner.
+actor PartialAPI: GitHubAPI {
+    let base: StaticGitHubAPI
+    let failedRepos: [String]
+
+    init(base: StaticGitHubAPI, failedRepos: [String]) {
+        self.base = base
+        self.failedRepos = failedRepos
+    }
+
+    func viewer() async throws -> Viewer { try await base.viewer() }
+    func repositories() async throws -> [Repo] { try await base.repositories() }
+    func openPullRequests(in repos: [String]) async throws -> OpenPullRequests {
+        var result = try await base.openPullRequests(in: repos)
+        result.failedRepos = failedRepos
+        return result
+    }
+    func checkDetails(for prs: [PullRequest]) async throws -> [String: CheckSummary] { try await base.checkDetails(for: prs) }
+    func latestRateLimit() async -> RateLimit? { await base.latestRateLimit() }
+}
