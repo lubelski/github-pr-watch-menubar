@@ -88,6 +88,8 @@ public struct AppConfig: Codable, Sendable, Equatable {
     /// Seconds between polls when the rate limit allows.
     public var pollInterval: TimeInterval
     public var guardCheckPatterns: [String]
+    /// The global notification settings. `nil` (an older file) means the defaults.
+    public var notifications: NotificationSettings?
 
     public init(
         authMethod: AuthMethod? = nil, viewer: Viewer? = nil, watchedRepos: [String] = [], onboardingComplete: Bool = false,

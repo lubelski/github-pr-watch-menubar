@@ -153,6 +153,13 @@ public final class PRStore {
     /// The most recent events, newest last, up to 50.
     public private(set) var recentEvents: [PREvent] = []
 
+    /// Global notification settings. Change with `setNotificationSettings`.
+    public private(set) var notificationSettings: NotificationSettings
+    /// Seconds between polls when the rate limit allows. Change with `setPollInterval`.
+    public private(set) var pollInterval: TimeInterval
+    /// Check-name substrings treated as guards. Change with `setGuardCheckPatterns`.
+    public private(set) var guardCheckPatterns: [String]
+
     /// Called on the main actor with each poll's events. The notification layer sets this.
     public var onEvents: (@MainActor ([PREvent]) -> Void)?
 
@@ -177,6 +184,7 @@ public final class PRStore {
     @ObservationIgnored private var consecutiveFailures = 0
     @ObservationIgnored private var nextDelay: TimeInterval?
     @ObservationIgnored private var policy: PollPolicy
+    @ObservationIgnored private var queueDropDebouncer = QueueDropDebouncer()
 
     public init(dependencies: PRStoreDependencies) {
         self.dependencies = dependencies
@@ -187,6 +195,9 @@ public final class PRStore {
         self.needsOnboarding = !config.onboardingComplete
         self.isCLIInstalled = dependencies.cliInstalled()
         self.policy = PollPolicy(baseInterval: config.pollInterval)
+        self.notificationSettings = config.notifications ?? NotificationSettings()
+        self.pollInterval = config.pollInterval
+        self.guardCheckPatterns = config.guardCheckPatterns
         self.snapshot = try? dependencies.snapshot.load()
         self.queueDrops = snapshot?.queueDrops ?? [:]
         self.selectedViewID = config.selectedViewID ?? views.first?.id
@@ -304,6 +315,8 @@ public final class PRStore {
         repoChoices = []
         lastUpdated = nil
         connection = .idle
+        recentEvents = []
+        queueDropDebouncer.reset()
         updateConfig {
             $0.authMethod = nil
             $0.viewer = nil
@@ -493,9 +506,11 @@ public final class PRStore {
             rateLimit = await api.latestRateLimit()
             nextDelay = policy.interval(after: rateLimit, pollCost: Self.cost(before: before, after: rateLimit), now: now)
 
-            if !events.isEmpty {
-                recentEvents = Array((recentEvents + events).suffix(50))
-                onEvents?(events)
+            // "Dropped from merge queue" waits a poll, in case GitHub was mid-merge.
+            let delivered = queueDropDebouncer.process(events, current: current, failedRepos: light.failedRepos)
+            if !delivered.isEmpty {
+                recentEvents = Array((recentEvents + delivered).suffix(50))
+                onEvents?(delivered)
             }
         } catch is CancellationError {
             nextDelay = nil
@@ -519,6 +534,35 @@ public final class PRStore {
         guard let login = viewer?.login else { pullRequests = []; return }
         let context = ClassificationContext(now: dependencies.now(), guardCheckPatterns: config.guardCheckPatterns, queueDrops: queueDrops)
         pullRequests = PRClassifier.classify(rawPullRequests, viewer: login, context: context)
+    }
+
+    // MARK: Settings
+
+    public func setNotificationSettings(_ settings: NotificationSettings) {
+        notificationSettings = settings
+        updateConfig { $0.notifications = settings }
+    }
+
+    /// The shortest interval allowed between polls.
+    public static let minimumPollInterval: TimeInterval = 30
+
+    /// Takes effect from the next poll.
+    public func setPollInterval(_ seconds: TimeInterval) {
+        let seconds = max(Self.minimumPollInterval, seconds)
+        pollInterval = seconds
+        policy.baseInterval = seconds
+        updateConfig { $0.pollInterval = seconds }
+    }
+
+    /// Trims, drops empties and duplicates, and reclassifies right away.
+    public func setGuardCheckPatterns(_ patterns: [String]) {
+        var seen = Set<String>()
+        let cleaned = patterns
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+        guardCheckPatterns = cleaned
+        updateConfig { $0.guardCheckPatterns = cleaned }
+        reclassify()
     }
 
     // MARK: Helpers
