@@ -169,7 +169,7 @@ public actor GitHubClient: GitHubAPI {
         } catch {
             throw GitHubError.decoding(String(describing: error))
         }
-        if let limit = envelope.data?.rateLimit { rateLimit = limit }
+        if let limit = envelope.data?.rateLimit ?? envelope.rateLimitOnly { rateLimit = limit }
         let errors = envelope.errors ?? []
         if errors.contains(where: { $0.type == "RATE_LIMITED" }) {
             throw GitHubError.rateLimited(resetAt: rateLimit?.resetAt)
@@ -250,6 +250,26 @@ private struct Envelope<T: Decodable>: Decodable {
 
     let data: Payload?
     let errors: [ErrorItem]?
+
+    enum CodingKeys: String, CodingKey { case data, errors }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        errors = try container.decodeIfPresent([ErrorItem].self, forKey: .errors)
+        if errors?.isEmpty == false {
+            // With errors, `data` may be partial or null. Keep what decodes.
+            data = try? container.decodeIfPresent(Payload.self, forKey: .data)
+            rateLimitOnly = try? container.decodeIfPresent(RateLimitOnly.self, forKey: .data)?.rateLimit?.rateLimit
+        } else {
+            data = try container.decodeIfPresent(Payload.self, forKey: .data)
+            rateLimitOnly = nil
+        }
+    }
+
+    /// The budget when the rest of `data` didn't decode.
+    let rateLimitOnly: RateLimit?
+
+    private struct RateLimitOnly: Decodable { let rateLimit: RawRateLimit? }
 }
 
 private struct RawRateLimit: Decodable {
