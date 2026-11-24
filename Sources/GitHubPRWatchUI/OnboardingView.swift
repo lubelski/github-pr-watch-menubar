@@ -52,11 +52,7 @@ public struct OnboardingView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 HStack(spacing: 10) {
-                    Image(systemName: "arrow.triangle.pull")
-                        .font(.title2)
-                        .foregroundStyle(.white)
-                        .frame(width: 40, height: 40)
-                        .background(RoundedRectangle(cornerRadius: 9).fill(Color.indigo.gradient))
+                    AppIconView(size: 40)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Set up GitHub PR Watch").font(.headline)
                         Text("Read-only. Never merges or re-runs.").font(.caption).foregroundStyle(.secondary)
