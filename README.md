@@ -1,6 +1,6 @@
 # GitHub PR Watch
 
-<img src="docs/icon.png" width="128" alt="The GitHub PR Watch app icon: a white pull request mark, two tracks with rings and an arrow pointing back, on indigo">
+<img src="docs/icon.png" width="128" alt="The GitHub PR Watch app icon: a white pull request mark, two tracks with rings and an arrow pointing back, on green">
 
 A macOS menu bar app, with a full window, for people who shepherd a lot of GitHub pull requests.
 Teammates and their coding agents open many PRs, CI takes 15 to 60 minutes, and auto-merge stalls.
