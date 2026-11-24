@@ -80,14 +80,17 @@ import Testing
         #expect(s.pullRequests.count == SampleData.pullRequests().count)
         let lanes = s.lanes(for: BuiltInViews.mineID)
         #expect(lanes.map(\.lane) == Lane.allCases)
-        let yourMove = lanes[0].pullRequests.map(\.pr.number)
-        #expect(yourMove.contains(4821))
-        #expect(yourMove.contains(1290))
-        #expect(!yourMove.contains(4835)) // Someone else's PR is not in Mine.
-        #expect(lanes[2].pullRequests.map(\.pr.number) == [4818])
+        func numbers(_ lane: Lane) -> Set<Int> {
+            Set(lanes.first { $0.lane == lane }?.pullRequests.map(\.pr.number) ?? [])
+        }
+        #expect(numbers(.ciRunning) == [4826])
+        #expect(numbers(.failing) == [4821, 4809, 1288, 1284])
+        #expect(numbers(.inReview) == [4799, 1279, 4840])
+        #expect(numbers(.readyToMerge) == [1290])
+        #expect(numbers(.mergeQueue) == [4818])
         #expect(s.pullRequests(in: BuiltInViews.needsMyReviewID).map(\.pr.number) == [4835])
-        // Mine and Needs my review are pinned: 6 of mine plus the review request.
-        #expect(s.yourMoveCount == 7)
+        // Drafts are left out of the view's count.
+        #expect(s.openCount(for: BuiltInViews.mineID) == 9)
     }
 
     @Test func onlyPRsInSomeViewGetCheckDetail() async {
@@ -118,7 +121,7 @@ import Testing
         await api.set(prs: [pr(checks: [check("ci")])])
         await s.refresh()
         #expect(s.pullRequests.first?.info.status.kind == .droppedFromMergeQueue)
-        #expect(s.pullRequests.first?.info.lane == .yourMove)
+        #expect(s.pullRequests.first?.info.lane == .failing)
     }
 
     @Test func errorsAreDistinctStates() async {

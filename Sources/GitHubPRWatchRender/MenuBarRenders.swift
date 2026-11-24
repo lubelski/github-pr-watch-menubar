@@ -13,7 +13,7 @@ enum MenuBarRenders {
             authMethod: .githubCLI, viewer: SampleData.viewer, watchedRepos: ["acme/web", "acme/api"], onboardingComplete: true
         )
 
-        // Your move, with one PR that just turned ready (for the "Just now" tag).
+        // A poll where one PR just turned ready (for Recent changes and the "Just now" tag).
         let api = StaticGitHubAPI(rateLimit: RateLimit(cost: 3, remaining: 4_812, resetAt: Date().addingTimeInterval(41 * 60)))
         var before = SampleData.pullRequests()
         if let i = before.firstIndex(where: { $0.id == "PR_ready" }) {
@@ -24,12 +24,14 @@ enum MenuBarRenders {
         await watching.refresh()
         await api.set(prs: SampleData.pullRequests())
         await watching.refresh()
+        // The badge and Recent changes come from the poll's events, as in the app.
+        let activity = MenuBarActivity()
+        activity.handle(watching.recentEvents, settings: watching.notificationSettings, notifier: notifier)
+        activity.clear()
 
-        // Nothing needs you: only PRs that are someone else's move or in flight.
-        let viewer = SampleData.viewer.login
-        let calmPRs = SampleData.pullRequests().filter { PRClassifier.classify($0, viewer: viewer).lane != .yourMove }
-        let calm = PRStore(dependencies: .inMemory(api: StaticGitHubAPI(prs: calmPRs), config: signedInConfig, views: SampleData.views))
-        await calm.refresh()
+        // Nothing open in the menu bar views.
+        let empty = PRStore(dependencies: .inMemory(api: StaticGitHubAPI(prs: []), config: signedInConfig, views: SampleData.views))
+        await empty.refresh()
 
         // Offline after a good poll: results stay, a banner says why.
         let offlineAPI = StaticGitHubAPI()
@@ -55,9 +57,10 @@ enum MenuBarRenders {
         let loading = PRStore(dependencies: .inMemory(api: StaticGitHubAPI(), config: signedInConfig, views: SampleData.views))
 
         for dark in [false, true] {
-            try await render("popover-your-move", MenuBarPopoverView(store: watching), dark: dark, to: folder)
-            try await render("popover-waiting-expanded", MenuBarPopoverView(store: watching, showWaiting: true), dark: dark, to: folder)
-            try await render("popover-nothing-needs-you", MenuBarPopoverView(store: calm), dark: dark, to: folder)
+            try await render("popover-recent-changes", MenuBarPopoverView(store: watching, activity: activity), dark: dark, to: folder)
+            try await render("popover-no-recent-changes", MenuBarPopoverView(store: watching), dark: dark, to: folder)
+            try await render("popover-all-expanded", MenuBarPopoverView(store: watching, activity: activity, expanded: Set(Lane.allCases)), dark: dark, to: folder)
+            try await render("popover-no-pull-requests", MenuBarPopoverView(store: empty), dark: dark, to: folder)
             try await render("popover-offline", MenuBarPopoverView(store: offline), dark: dark, to: folder)
             try await render("popover-offline-no-data", MenuBarPopoverView(store: offlineEmpty), dark: dark, to: folder)
             try await render("popover-token-rejected", MenuBarPopoverView(store: rejected), dark: dark, to: folder)
@@ -69,8 +72,8 @@ enum MenuBarRenders {
 
         let states: [(String, MenuBarIndicator, String?)] = [
             ("calm", .calm, nil),
-            ("badge", .needsYou(3), nil),
-            ("label", .needsYou(3), "#1293 ready to merge"),
+            ("badge", .changed, nil),
+            ("label", .changed, "#1293 ready to merge"),
             ("offline", .offline, nil),
             ("signed-out", .signedOut, nil),
         ]

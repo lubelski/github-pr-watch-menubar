@@ -9,45 +9,33 @@ import Testing
 
     @Test func indicator() {
         typealias I = MenuBarIndicator
-        #expect(I.make(isSignedIn: false, needsOnboarding: false, connection: .upToDate, yourMoveCount: 3) == .signedOut)
-        #expect(I.make(isSignedIn: true, needsOnboarding: true, connection: .idle, yourMoveCount: 0) == .signedOut)
-        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .tokenRejected, yourMoveCount: 2) == .signedOut)
-        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .offline, yourMoveCount: 2) == .offline)
-        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .failed("x"), yourMoveCount: 0) == .offline)
-        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .rateLimited(until: nil), yourMoveCount: 2) == .needsYou(2))
-        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .upToDate, yourMoveCount: 0) == .calm)
-        #expect(I.needsYou(1).accessibilityText == "GitHub PR Watch, 1 pull request needs you")
+        #expect(I.make(isSignedIn: false, needsOnboarding: false, connection: .upToDate, hasChanges: true) == .signedOut)
+        #expect(I.make(isSignedIn: true, needsOnboarding: true, connection: .idle, hasChanges: false) == .signedOut)
+        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .tokenRejected, hasChanges: true) == .signedOut)
+        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .offline, hasChanges: true) == .offline)
+        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .failed("x"), hasChanges: false) == .offline)
+        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .rateLimited(until: nil), hasChanges: true) == .changed)
+        #expect(I.make(isSignedIn: true, needsOnboarding: false, connection: .upToDate, hasChanges: false) == .calm)
+        #expect(I.changed.accessibilityText == "GitHub PR Watch, pull requests changed since you last looked")
     }
 
-    @Test func waitingSummaryCountsByKind() {
+    @Test func groupsSkipEmptyLanesInOrder() {
         let prs = [
+            classified(pr("Q", queue: MergeQueueEntry(position: 0))),
             classified(pr("A", checks: [check("ci", .running)])),
-            classified(pr("B", checks: [check("ci", .running)])),
-            classified(pr("C", queue: MergeQueueEntry(position: 0))),
-            classified(pr("D", decision: .reviewRequired, state: .blocked)),
-            classified(pr("E", draft: true)),
-            classified(pr("F", author: "apark")), // ready, but someone else's move
-            classified(pr("G")), // your move: not counted
+            classified(pr("F", checks: [check("lint", .failed)])),
+            classified(pr("D", draft: true)),
         ]
-        #expect(MenuBarSummary.waitingSummary(prs) == "2 in CI, 1 in queue, 1 in review, 1 draft, 1 on others")
-        #expect(MenuBarSummary.waitingSummary([]) == "")
+        let groups = MenuBarSummary.groups(prs)
+        #expect(groups.map(\.lane) == [.ciRunning, .failing, .inReview, .mergeQueue])
+        #expect(MenuBarSummary.groups([]).isEmpty)
+        #expect(MenuBarSummary.expandedByDefault == [.failing, .readyToMerge])
     }
 
-    @Test func calmSentence() {
-        let waiting = [classified(pr("A", checks: [check("ci", .running)]))]
-        #expect(MenuBarSummary.calmSentence(waiting: waiting, bannersOn: true)
-            == "1 pull request is in flight: 1 in CI. You'll get a banner the moment one needs you.")
-        #expect(MenuBarSummary.calmSentence(waiting: waiting, bannersOn: false) == "1 pull request is in flight: 1 in CI.")
-        #expect(MenuBarSummary.calmSentence(waiting: [], bannersOn: true) == "No open pull requests in your menu bar views.")
-    }
-
-    @Test func yourMoveNewestChangeFirst() {
-        let old = classified(pr("OLD"))
-        let newer = classified(pr("NEW"))
-        let waiting = classified(pr("W", checks: [check("ci", .running)]))
-        let event = PREvent(kind: .ciReady, pr: old.pr, viewID: UUID(), viewName: "Mine", occurredAt: minutes(1))
-        let order = MenuBarSummary.yourMoveOrder([newer, old, waiting], recentEvents: [event])
-        #expect(order.map(\.id) == ["OLD", "NEW"])
+    @Test func emptySentence() {
+        #expect(MenuBarSummary.emptySentence(bannersOn: true)
+            == "Nothing open matches your menu bar views. You'll get a banner when one changes.")
+        #expect(MenuBarSummary.emptySentence(bannersOn: false) == "Nothing open matches your menu bar views.")
     }
 
     @Test func justChangedWindow() {

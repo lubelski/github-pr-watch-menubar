@@ -2,8 +2,9 @@ import GitHubPRWatchCore
 import SwiftUI
 
 /// One lane of the main window: a header with its count, then its cards in their own scroll
-/// view. Your move is tinted. The Waiting lane folds drafts into a collapsed group at the end,
-/// and the CI running lane briefly notes PRs that just finished and moved to Your move.
+/// view. In review folds drafts into a collapsed group at the end. A card whose CI just
+/// finished is highlighted in whatever lane it landed in, and the CI running lane briefly
+/// notes where it went.
 ///
 /// Lanes and cards are content, so they stay plain: no glass. The header floats over the
 /// lane's scroll view with the system's scroll edge effect.
@@ -19,8 +20,8 @@ struct LaneColumnView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var lane: Lane { group.lane }
-    private var cards: [ClassifiedPR] { lane == .waiting ? group.pullRequests.filter { !$0.pr.isDraft } : group.pullRequests }
-    private var drafts: [ClassifiedPR] { lane == .waiting ? group.pullRequests.filter(\.pr.isDraft) : [] }
+    private var cards: [ClassifiedPR] { lane == .inReview ? group.pullRequests.filter { !$0.pr.isDraft } : group.pullRequests }
+    private var drafts: [ClassifiedPR] { lane == .inReview ? group.pullRequests.filter(\.pr.isDraft) : [] }
 
     var body: some View {
         // The header is a bar over the top of the lane's scroll view, so cards scroll under it
@@ -31,7 +32,7 @@ struct LaneColumnView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(lane == .yourMove ? Color.accentColor.opacity(0.09) : Color.primary.opacity(0.045))
+                .fill(Color.primary.opacity(0.045))
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(lane.title), \(group.pullRequests.count) pull request\(group.pullRequests.count == 1 ? "" : "s")")
@@ -80,7 +81,7 @@ struct LaneColumnView: View {
     private var header: some View {
         HStack(spacing: 6) {
             Image(systemName: StatusStyle.symbol(for: lane))
-                .foregroundStyle(lane == .yourMove ? Color.accentColor : .secondary)
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Text(lane.title)
                 .font(.headline)
@@ -89,13 +90,7 @@ struct LaneColumnView: View {
                 .font(.headline)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
-            Spacer(minLength: 4)
-            if lane == .yourMove {
-                Text("needs you")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-            }
+            Spacer(minLength: 0)
         }
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
@@ -104,7 +99,7 @@ struct LaneColumnView: View {
     private func card(_ item: ClassifiedPR) -> some View {
         PRRowView(
             item, style: .card, viewer: viewer, isSelected: selectedID == item.id,
-            justFinishedAt: lane == .yourMove ? justFinished[item.id] : nil,
+            justFinishedAt: justFinished[item.id],
             onOpen: { onOpen(item) }
         )
         .id(item.id)
@@ -139,16 +134,17 @@ struct LaneColumnView: View {
 
     static func emptyText(_ lane: Lane) -> String {
         switch lane {
-        case .yourMove: "Nothing needs you right now"
         case .ciRunning: "No CI running"
-        case .inMergeQueue: "Nothing in a merge queue"
-        case .waiting: "Nothing waiting on others"
+        case .failing: "Nothing failing"
+        case .inReview: "Nothing in review"
+        case .readyToMerge: "Nothing ready to merge"
+        case .mergeQueue: "Nothing in a merge queue"
         }
     }
 }
 
 /// The dashed note left in CI running for a moment after a PR's CI finished and it moved to
-/// Your move, so the move is noticed.
+/// another lane, so the move is noticed. It names the lane.
 private struct MovedNoteView: View {
     let note: LaneBoard.MovedNote
 
@@ -156,7 +152,7 @@ private struct MovedNoteView: View {
         HStack(spacing: 4) {
             Text("\(note.shortRef) finished")
             Image(systemName: "arrow.right").accessibilityHidden(true)
-            Text("moved to Your move")
+            Text(note.lane.title)
         }
         .font(.caption)
         .foregroundStyle(Color.accentColor)
@@ -170,6 +166,6 @@ private struct MovedNoteView: View {
                 .strokeBorder(Color.accentColor.opacity(0.7), style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
         )
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(note.shortRef) finished CI and moved to Your move")
+        .accessibilityLabel("\(note.shortRef) finished CI and \(note.destinationText)")
     }
 }

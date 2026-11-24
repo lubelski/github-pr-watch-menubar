@@ -2,13 +2,16 @@ import AppKit
 import GitHubPRWatchCore
 import SwiftUI
 
-/// The menubar popover (Figma row 3B): "Your move" first, newest change on top; everything
-/// else under a collapsed "Waiting" row with a one-line summary. Draws from the views
-/// pinned to the menubar (`PRStore.menuBarPullRequests`), so a PR in two pinned views
-/// shows once. Clicking a row opens the PR and closes the popover.
+/// The menubar popover (Figma row 3B): "Recent changes" on top, the PRs with an event since
+/// you last looked (`ChangeBadge`), newest first; then every PR grouped under the five lane
+/// names, each group collapsible, Failing and Ready to merge expanded to start. Draws from
+/// the views pinned to the menubar (`PRStore.menuBarPullRequests`), so a PR in two pinned
+/// views shows once per group. Opening the popover clears the menu bar badge. Clicking a row
+/// opens the PR and closes the popover.
 public struct MenuBarPopoverView: View {
     let store: PRStore
-    @State private var showWaiting: Bool
+    let activity: MenuBarActivity?
+    @State private var expanded: Set<Lane>
     @State private var listHeight: CGFloat = 0
     @State private var window: NSWindow?
     @AppStorage(SettingsTab.storageKey) private var settingsTab: SettingsTab = .account
@@ -19,10 +22,11 @@ public struct MenuBarPopoverView: View {
     public static let width: CGFloat = 360
     public static let maxListHeight: CGFloat = 440
 
-    /// `showWaiting` starts the Waiting section expanded, for renders.
-    public init(store: PRStore, showWaiting: Bool = false) {
+    /// `expanded` chooses which lane groups start open, for renders.
+    public init(store: PRStore, activity: MenuBarActivity? = nil, expanded: Set<Lane> = MenuBarSummary.expandedByDefault) {
         self.store = store
-        self._showWaiting = State(initialValue: showWaiting)
+        self.activity = activity
+        self._expanded = State(initialValue: expanded)
     }
 
     public var body: some View {
@@ -33,7 +37,10 @@ public struct MenuBarPopoverView: View {
         }
         .frame(width: Self.width)
         .background(WindowReader(window: $window))
-        .onAppear(perform: refreshIfStale)
+        .onAppear {
+            activity?.markSeen()
+            refreshIfStale()
+        }
     }
 
     // MARK: States
@@ -98,35 +105,30 @@ public struct MenuBarPopoverView: View {
 
     private var list: some View {
         let prs = store.menuBarPullRequests
-        let yourMove = MenuBarSummary.yourMoveOrder(prs, recentEvents: store.recentEvents)
-        let waiting = PRStore.lanes(prs).filter { $0.lane != .yourMove }.flatMap(\.pullRequests)
+        let recent = activity?.changes.recentChanges(in: prs) ?? []
+        let groups = MenuBarSummary.groups(prs)
         let justChanged = MenuBarSummary.justChanged(store.recentEvents, now: .now)
 
         return VStack(spacing: 0) {
-            yourMoveHeader(count: yourMove.count)
+            listHeader(count: prs.count)
             if let message = store.connection.message {
                 StaleBanner(message: message) { store.refreshNow() }
             }
             ScrollView {
                 VStack(spacing: 0) {
-                    if yourMove.isEmpty {
-                        CalmState(sentence: MenuBarSummary.calmSentence(
-                            waiting: waiting, bannersOn: store.notificationSettings.bannersEnabled
-                        ))
+                    if prs.isEmpty {
+                        EmptyListState(sentence: MenuBarSummary.emptySentence(bannersOn: store.notificationSettings.bannersEnabled))
                     } else {
-                        VStack(spacing: 0) {
-                            ForEach(yourMove) { item in
-                                PopoverPRRow(item: item, isNew: justChanged.contains(item.id), open: openPR)
-                            }
+                        if !recent.isEmpty {
+                            recentSection(recent, justChanged: justChanged)
+                            Divider()
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.bottom, 6)
-                    }
-                    if !waiting.isEmpty {
-                        Divider()
-                        waitingSection(waiting, justChanged: justChanged)
+                        ForEach(groups) { group in
+                            laneSection(group, justChanged: justChanged)
+                        }
                     }
                 }
+                .padding(.bottom, 4)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { listHeight = $0 }
             }
             .scrollBounceBehavior(.basedOnSize)
@@ -134,9 +136,9 @@ public struct MenuBarPopoverView: View {
         }
     }
 
-    private func yourMoveHeader(count: Int) -> some View {
+    private func listHeader(count: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text("Your move").font(.system(size: 13, weight: .semibold))
+            Text("Pull requests").font(.system(size: 13, weight: .semibold))
             Text("\(count)").font(.system(size: 13)).foregroundStyle(.secondary).monospacedDigit()
             Spacer()
             Text(viewsCaption)
@@ -158,41 +160,65 @@ public struct MenuBarPopoverView: View {
         return pinned ? "\(views.count) pinned views" : "All views"
     }
 
-    private func waitingSection(_ waiting: [ClassifiedPR], justChanged: Set<String>) -> some View {
-        VStack(spacing: 0) {
+    private func recentSection(_ recent: [ClassifiedPR], justChanged: Set<String>) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 12)
+                    .accessibilityHidden(true)
+                Text("Recent changes").font(.system(size: 12, weight: .semibold))
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+            .padding(.bottom, 2)
+            .accessibilityAddTraits(.isHeader)
+            VStack(spacing: 0) {
+                ForEach(recent) { item in
+                    PopoverPRRow(item: item, isNew: justChanged.contains(item.id), open: openPR)
+                }
+            }
+            .padding(.horizontal, 6)
+            .padding(.bottom, 6)
+        }
+    }
+
+    private func laneSection(_ group: PRStore.LaneGroup, justChanged: Set<String>) -> some View {
+        let isExpanded = expanded.contains(group.lane)
+        return VStack(spacing: 0) {
             Button {
-                withAnimation(.snappy(duration: 0.2)) { showWaiting.toggle() }
+                withAnimation(.snappy(duration: 0.2)) {
+                    if isExpanded { expanded.remove(group.lane) } else { expanded.insert(group.lane) }
+                }
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Image(systemName: "chevron.right")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(.secondary)
-                        .rotationEffect(.degrees(showWaiting ? 90 : 0))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
                         .frame(width: 12)
-                    Text("Waiting").font(.system(size: 12, weight: .semibold))
-                    Text("\(waiting.count)").font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
+                    Text(group.lane.title).font(.system(size: 12, weight: .semibold))
+                    Text("\(group.pullRequests.count)").font(.system(size: 12)).foregroundStyle(.secondary).monospacedDigit()
                     Spacer(minLength: 8)
-                    Text(MenuBarSummary.waitingSummary(waiting))
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
                 }
                 .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                .padding(.vertical, 6)
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("Waiting, \(waiting.count): \(MenuBarSummary.waitingSummary(waiting))")
-            .accessibilityHint(showWaiting ? "Collapses the list" : "Expands the list")
+            .accessibilityLabel("\(group.lane.title), \(group.pullRequests.count)")
+            .accessibilityValue(isExpanded ? "Expanded" : "Collapsed")
+            .accessibilityHint(isExpanded ? "Collapses the list" : "Expands the list")
 
-            if showWaiting {
+            if isExpanded {
                 VStack(spacing: 0) {
-                    ForEach(waiting) { item in
+                    ForEach(group.pullRequests) { item in
                         PopoverPRRow(item: item, isNew: justChanged.contains(item.id), open: openPR)
                     }
                 }
                 .padding(.horizontal, 6)
-                .padding(.bottom, 6)
+                .padding(.bottom, 4)
             }
         }
     }
@@ -329,16 +355,16 @@ private struct ProgressState: View {
     }
 }
 
-private struct CalmState: View {
+private struct EmptyListState: View {
     let sentence: String
 
     var body: some View {
         VStack(spacing: 6) {
-            Image(systemName: "checkmark.circle.fill")
+            Image(systemName: "tray")
                 .font(.system(size: 24))
-                .foregroundStyle(.green)
+                .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
-            Text("Nothing needs you right now").font(.system(size: 13, weight: .semibold))
+            Text("No open pull requests").font(.system(size: 13, weight: .semibold))
             Text(sentence)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
