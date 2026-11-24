@@ -157,6 +157,8 @@ public final class PRStore {
     /// Every open PR in the watched repos, classified for the viewer.
     public private(set) var pullRequests: [ClassifiedPR] = []
     public private(set) var lastUpdated: Date?
+    /// When the last poll started, whether or not it worked. `connection` says how it went.
+    public private(set) var lastPollStarted: Date?
     public private(set) var isRefreshing = false
     public private(set) var connection: ConnectionState = .idle
     /// Watched repos the last poll couldn't read.
@@ -505,6 +507,7 @@ public final class PRStore {
         guard let api, !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
+        lastPollStarted = dependencies.now()
         let before = rateLimit
         do {
             var login = viewer?.login

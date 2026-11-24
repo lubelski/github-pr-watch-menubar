@@ -21,7 +21,10 @@ Feature work happens in parallel, so each UI feature has its own file in `Source
 | `LanesWindowView.swift` | The main window's lanes |
 | `MenuBarPopoverView.swift` | The menu bar popover |
 | `ViewEditorView.swift` | The filter builder for views |
-| `SettingsView.swift` | Settings |
+| `SettingsView.swift` | Settings: the sidebar and the Account, Repos, Notifications, and Advanced sections |
+| `UpdatesSection.swift` | Settings, Advanced: the version and the updater's controls |
+| `ExperimentsSettings.swift` | Settings, Experiments |
+| `DebuggingSettings.swift` | Settings, Debugging |
 | `OnboardingView.swift` | One-screen setup |
 | `UserNotifier.swift` | Banners |
 
@@ -34,14 +37,30 @@ Shared pieces live in their own files: `PRRowView.swift`, `StatusStyle.swift`, `
 - **Never print, log, or commit a token.**
 - **Ask before launching the app.** Will works on the same Mac. Anything that opens a window, takes focus, or shows a notification-permission or Keychain prompt needs his OK first, with a time estimate. Use a windowless render instead.
 - **Run only the bundle**, never `swift run`. `swift build` stamps the binary with the wrong SDK version. See `scripts/bundle.sh`.
+- **Settings order.** A new section goes above Experiments. Experiments is second to last and Debugging is always last (`SettingsTab`).
+- **Experiments.** A feature that isn't settled goes behind a case of `Experiment` (`Sources/GitHubPRWatchCore/Experiments.swift`), off by default. With the switch off, the app is as it was.
+- **Debugging and Copy Diagnostics** hold counts, dates, states, and paths only: never a token, the login, repo names, or pull requests. `DiagnosticsTests` checks it.
+- **Names.** Anything a machine reads is named after the repo: `dev.lubelski.github-pr-watch-menubar`, `build/github-pr-watch-menubar.app`, `~/Library/Application Support/github-pr-watch-menubar/`. People read "GitHub PR Watch" (`AppInfo.name`). `AppIdentity` in Core holds the names.
 
 ## Checks
 
 ```sh
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 ./scripts/bundle.sh
 ./scripts/render.sh
+codesign --verify --deep --strict build/github-pr-watch-menubar.app
+xcrun vtool -show-build build/github-pr-watch-menubar.app/Contents/MacOS/github-pr-watch-menubar
 ```
+
+## Updates and releases
+
+The README's "Updating" and "Releasing" sections describe both. For agents:
+
+- **Sparkle lives in one file**, `Sources/github-pr-watch-menubar/AppUpdater.swift`. The UI library sees it only through the `AppUpdating` protocol, so the render tool never links Sparkle. When a held update may install is `AppUpdates` in Core, with tests.
+- **A push to `main` ships a release** once the repo is in `mac-app-release-poller`. Never push to `main` directly.
+- **Run `scripts/release.sh` only as `--check`**, which changes nothing. `--dry-run` publishes nothing but reads the Sparkle private key from the Keychain, which can prompt, so ask first. A real release only when Will asks.
+- Never commit or print keys, `notary.conf`, or tokens. `scripts/sparkle-public-key.txt` is the public half and belongs in the repo.
 
 ## Icons
 

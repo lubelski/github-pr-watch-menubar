@@ -2,7 +2,8 @@ import AppKit
 import GitHubPRWatchCore
 import SwiftUI
 
-/// Settings: account, watched repos, notifications, views, and polling.
+/// Settings: account, watched repos, notifications, views, polling and updates, experiments,
+/// and debugging.
 ///
 /// The layout is the one in the sibling app mac-os-agent (`SettingsRootView` in its
 /// `SettingsWindow.swift`): a sidebar of sections with symbols, at a fixed width, beside the
@@ -21,13 +22,20 @@ public struct SettingsView: View {
 
     let store: PRStore
     let notifier: any Notifier
+    let updater: any AppUpdating
+    let build: BuildInfo
     let fixedTab: SettingsTab?
     @AppStorage(SettingsTab.storageKey) private var storedTab: SettingsTab = .account
 
-    /// `tab` pins the section, for renders.
-    public init(store: PRStore, notifier: any Notifier, tab: SettingsTab? = nil) {
+    /// `tab` pins the section, for renders. `build` is this bundle's unless a render passes one.
+    public init(
+        store: PRStore, notifier: any Notifier, updater: any AppUpdating = NoUpdater(),
+        build: BuildInfo = .current(), tab: SettingsTab? = nil
+    ) {
         self.store = store
         self.notifier = notifier
+        self.updater = updater
+        self.build = build
         self.fixedTab = tab
     }
 
@@ -57,7 +65,7 @@ public struct SettingsView: View {
             Divider()
             // A minimum of zero keeps a section's ideal size from pushing the window or the
             // sidebar around.
-            SettingsPane(store: store, notifier: notifier, tab: selection.wrappedValue)
+            SettingsPane(store: store, notifier: notifier, updater: updater, build: build, tab: selection.wrappedValue)
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         }
         .frame(
@@ -72,11 +80,18 @@ public struct SettingsView: View {
 public struct SettingsPane: View {
     let store: PRStore
     let notifier: any Notifier
+    let updater: any AppUpdating
+    let build: BuildInfo
     let tab: SettingsTab
 
-    public init(store: PRStore, notifier: any Notifier, tab: SettingsTab) {
+    public init(
+        store: PRStore, notifier: any Notifier, updater: any AppUpdating = NoUpdater(),
+        build: BuildInfo = .current(), tab: SettingsTab
+    ) {
         self.store = store
         self.notifier = notifier
+        self.updater = updater
+        self.build = build
         self.tab = tab
     }
 
@@ -86,7 +101,9 @@ public struct SettingsPane: View {
         case .repos: RepoSettings(store: store)
         case .notifications: NotificationSettingsPane(store: store, notifier: notifier)
         case .views: ViewEditorView(store: store)
-        case .advanced: AdvancedSettings(store: store)
+        case .advanced: AdvancedSettings(store: store, updater: updater, build: build)
+        case .experiments: ExperimentsSettings()
+        case .debugging: DebuggingSettings(store: store, build: build)
         }
     }
 }
@@ -428,6 +445,8 @@ struct NotificationSettingsPane: View {
 
 struct AdvancedSettings: View {
     let store: PRStore
+    let updater: any AppUpdating
+    let build: BuildInfo
     @State private var newPattern = ""
 
     static let intervals: [(TimeInterval, String)] = [
@@ -443,25 +462,10 @@ struct AdvancedSettings: View {
                         Text(Formatting.duration(store.pollInterval)).tag(store.pollInterval)
                     }
                 }
-                LabeledContent("Status") {
-                    HStack {
-                        ConnectionStatusView(store: store)
-                        Button("Refresh Now") { store.refreshNow() }
-                            .disabled(store.isRefreshing || store.viewer == nil)
-                    }
-                }
-                LabeledContent("Rate limit") {
-                    if let limit = store.rateLimit {
-                        Text("\(limit.remaining.formatted()) of \(limit.limit.formatted()) points left · resets \(limit.resetAt.formatted(date: .omitted, time: .shortened))")
-                            .monospacedDigit()
-                    } else {
-                        Text("Not known yet").foregroundStyle(.secondary)
-                    }
-                }
             } header: {
                 Text("Polling")
             } footer: {
-                Text("When less than a fifth of the hourly budget is left, polls spread out so it lasts until it resets.")
+                Text("When less than a fifth of the hourly budget is left, polls spread out so it lasts until it resets. The last poll, the rate limit and Refresh Now are in Debugging.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 
@@ -494,11 +498,7 @@ struct AdvancedSettings: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
-            Section("About") {
-                LabeledContent(AppInfo.name) { Text(AppInfo.versionText).textSelection(.enabled) }
-                Text("Read-only: it shows pull requests and sends notifications, and never writes to GitHub.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
+            UpdatesSection(updater: updater, build: build)
         }
         .formStyle(.grouped)
     }

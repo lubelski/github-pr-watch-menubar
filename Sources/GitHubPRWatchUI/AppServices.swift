@@ -7,14 +7,6 @@ public enum AppInfo {
     /// The static window title, centered in a plain title bar.
     public static let name = "GitHub PR Watch"
     public static let mainWindowID = "main"
-
-    /// `Version 0.1.0 (12)` from the bundle, or `Development build` outside one.
-    public static var versionText: String {
-        let info = Bundle.main.infoDictionary
-        guard let short = info?["CFBundleShortVersionString"] as? String else { return "Development build" }
-        let build = info?["CFBundleVersion"] as? String
-        return "Version " + (build.map { "\(short) (\($0))" } ?? short)
-    }
 }
 
 /// The store, the notifier and the menu bar activity, wired together. One per process.

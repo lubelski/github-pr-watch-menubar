@@ -18,14 +18,15 @@ public struct JSONFileStore<Document: Codable & Sendable>: DocumentStore {
         self.url = url
     }
 
-    /// `~/Library/Application Support/GitHub PR Watch/<name>`.
+    /// `~/Library/Application Support/github-pr-watch-menubar/<name>`.
     public init(applicationSupportFile name: String) {
         self.init(url: Self.applicationSupportDirectory.appendingPathComponent(name))
     }
 
+    /// The data folder, named after the repo as the bundle identifier is.
     public static var applicationSupportDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("GitHub PR Watch", isDirectory: true)
+            .appendingPathComponent(AppIdentity.repoName, isDirectory: true)
     }
 
     public func load() throws -> Document? {

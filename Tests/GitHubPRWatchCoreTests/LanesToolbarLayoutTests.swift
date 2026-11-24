@@ -30,7 +30,7 @@ import Testing
 
 @Suite struct SettingsSectionTests {
     @Test func sidebarOrder() {
-        #expect(SettingsTab.allCases == [.account, .repos, .notifications, .views, .advanced])
+        #expect(SettingsTab.allCases == [.account, .repos, .notifications, .views, .advanced, .experiments, .debugging])
     }
 
     @Test func everySectionHasATitleAndItsOwnSymbol() {
