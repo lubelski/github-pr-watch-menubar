@@ -1,9 +1,9 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.4
 import PackageDescription
 
 let package = Package(
     name: "GitHubPRWatch",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v27)],
     targets: [
         // Models, GitHub client, auth, classifier, filters, transitions, and PRStore. No UI.
         .target(name: "GitHubPRWatchCore"),

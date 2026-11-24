@@ -19,7 +19,7 @@ BIN="$(swift build --show-bin-path)/GitHubPRWatchRender"
 # the current look instead of the compatibility mode for older apps.
 mkdir -p build
 STAMPED=build/GitHubPRWatchRender
-xcrun vtool -set-build-version macos 15.0 "$(xcrun --sdk macosx --show-sdk-version)" -replace \
+xcrun vtool -set-build-version macos 27.0 "$(xcrun --sdk macosx --show-sdk-version)" -replace \
   -output "$STAMPED" "$BIN"
 codesign --force --sign - "$STAMPED" 2>/dev/null
 

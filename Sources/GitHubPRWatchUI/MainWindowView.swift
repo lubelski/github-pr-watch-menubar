@@ -3,6 +3,9 @@ import SwiftUI
 
 /// The main window's root: onboarding until setup is done, then the lanes.
 ///
+/// The title bar says the app's name, centered. The lanes add their controls to the window's
+/// toolbar under it; onboarding adds none, so while it shows the window has the title bar only.
+///
 /// Signing out after setup brings onboarding back so you can sign in again. As soon as a
 /// sign-in succeeds, the lanes return with the same repos and views, and a poll starts.
 public struct MainWindowView: View {
@@ -29,6 +32,7 @@ public struct MainWindowView: View {
             }
         }
         .background(Color(nsColor: .windowBackgroundColor))
+        .centeredTitleBar()
         .showsDockIconWhileOpen()
         .onChange(of: store.auth) { _, auth in
             switch auth {

@@ -63,27 +63,9 @@ enum MenuBarRenders {
             try await render("popover-token-rejected", MenuBarPopoverView(store: rejected), dark: dark, to: folder)
             try await render("popover-signed-out", MenuBarPopoverView(store: signedOut), dark: dark, to: folder)
             try await render("popover-loading", MenuBarPopoverView(store: loading), dark: dark, to: folder)
-            for tab in SettingsTab.allCases {
-                try await render(
-                    "settings-\(tab.rawValue)", SettingsView(store: watching, notifier: notifier, tab: tab),
-                    size: CGSize(width: 560, height: 560), dark: dark, to: folder
-                )
-            }
-            try await render(
-                "settings-account-signed-out", SettingsView(store: signedOut, notifier: notifier, tab: .account),
-                size: CGSize(width: 560, height: 560), dark: dark, to: folder
-            )
-            try await render(
-                "settings-notifications-denied",
-                SettingsView(store: watching, notifier: RecordingNotifier(status: .denied), tab: .notifications),
-                size: CGSize(width: 560, height: 560), dark: dark, to: folder
-            )
-            try await render(
-                "settings-notifications-not-asked",
-                SettingsView(store: watching, notifier: RecordingNotifier(status: .notDetermined), tab: .notifications),
-                size: CGSize(width: 560, height: 560), dark: dark, to: folder
-            )
         }
+        // Each Settings section, as the whole window (see WindowRenders.swift).
+        try await renderSettings(watching: watching, signedOut: signedOut, notifier: notifier)
 
         let states: [(String, MenuBarIndicator, String?)] = [
             ("calm", .calm, nil),

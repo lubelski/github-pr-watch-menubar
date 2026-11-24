@@ -1,12 +1,18 @@
 import GitHubPRWatchCore
 import SwiftUI
 
-/// The main window (Figma row 1B, "Lanes by state"): a bar with the view picker, last update,
-/// Refresh and a filter field; banners for connection trouble; then four lanes by state
-/// (Your move, CI running, In merge queue, Waiting on others), each scrolling on its own.
+/// The main window (Figma row 1B, "Lanes by state"): the view picker, last update, Refresh,
+/// New View and a filter field in the window's toolbar; banners for connection trouble under
+/// it; then four lanes by state (Your move, CI running, In merge queue, Waiting on others),
+/// each scrolling on its own.
+///
+/// The controls are real toolbar items, so the system draws them in Liquid Glass, and the
+/// filter is the toolbar's own search field. The title bar above them says the app's name,
+/// centered (see `centeredTitleBar`, applied by `MainWindowView`).
 ///
 /// What fills and orders the lanes is `LaneBoard` in Core. Keyboard: arrows move the selection
-/// across cards and lanes, Return opens it, ⌘R refreshes, ⌘F filters, Escape clears the filter.
+/// across cards and lanes, Return opens it, ⌘R refreshes, ⌘F filters, Escape clears the filter
+/// and Return in the filter goes back to the lanes.
 public struct LanesWindowView: View {
     @Bindable var store: PRStore
 
@@ -16,6 +22,9 @@ public struct LanesWindowView: View {
     @State private var opened: Set<String> = []
     @State private var showDrafts = false
     @State private var editor: EditorSheet?
+    /// The window's width and the view tabs' natural width, to choose tabs or one menu.
+    @State private var windowWidth: CGFloat = 0
+    @State private var tabsWidth: CGFloat = 0
     @FocusState private var focus: Focus?
 
     enum Focus: Hashable { case board, search }
@@ -26,18 +35,46 @@ public struct LanesWindowView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            LanesBar(store: store, query: $query, focus: $focus, editor: $editor)
-            Divider()
             LanesBanners(store: store)
             TimelineView(.periodic(from: .now, by: 20)) { context in
                 content(board(now: context.date))
             }
         }
         .frame(minWidth: 900, minHeight: 480)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
+        .toolbar {
+            LanesToolbar(
+                store: store, editor: $editor,
+                showsTabs: LanesToolbarLayout.showsTabs(tabsWidth: tabsWidth, windowWidth: windowWidth)
+            )
+        }
+        .searchable(text: $query, placement: .toolbar, prompt: Text("Filter"))
+        .searchFocused($focus, equals: .search)
+        .onSubmit(of: .search) { focus = .board }
+        .background { shortcutsAndMeasuring }
         .sheet(item: $editor) { sheet in
             ViewEditorSheet(store: store, sheet: sheet)
         }
         .onAppear { focus = .board }
+    }
+
+    /// ⌘F and ⌘R from anywhere in the window, and an invisible copy of the view tabs that
+    /// reports how wide they want to be. A toolbar item is never offered less than its natural
+    /// width, so the toolbar can't decide this itself.
+    private var shortcutsAndMeasuring: some View {
+        ZStack {
+            Button("Filter") { focus = .search }
+                .keyboardShortcut("f", modifiers: .command)
+            Button("Refresh") { store.refreshNow() }
+                .keyboardShortcut("r", modifiers: .command)
+                .disabled(store.isRefreshing || store.viewer == nil)
+            ViewTabsWithMenu(store: store, editor: $editor)
+                .fixedSize()
+                .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { tabsWidth = $0 }
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     // MARK: Board
@@ -163,62 +200,68 @@ enum EditorSheet: String, Identifiable {
     var id: String { rawValue }
 }
 
-// MARK: - Bar
+// MARK: - Toolbar
 
-/// The bar under the title bar: view picker, last update, Refresh, the filter field and New View.
-private struct LanesBar: View {
+/// The window's toolbar: the view picker on the leading side; the last update, Refresh and
+/// New View on the trailing side, before the search field that `.searchable` adds.
+///
+/// The system groups neighboring items into one glass shape. The last-updated text sits
+/// outside any shape, Refresh has its own, and New View is set apart with a fixed spacer.
+private struct LanesToolbar: ToolbarContent {
     @Bindable var store: PRStore
-    @Binding var query: String
-    var focus: FocusState<LanesWindowView.Focus?>.Binding
+    @Binding var editor: EditorSheet?
+    let showsTabs: Bool
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            if showsTabs {
+                ViewTabsWithMenu(store: store, editor: $editor)
+            } else {
+                ViewMenu(store: store, editor: $editor)
+            }
+        }
+        ToolbarItem(placement: .primaryAction) { LastUpdatedText(store: store) }
+            .sharedBackgroundVisibility(.hidden)
+        ToolbarItem(placement: .primaryAction) { RefreshButton(store: store) }
+        ToolbarSpacer(.fixed, placement: .primaryAction)
+        ToolbarItem(placement: .primaryAction) {
+            Button { editor = .new } label: {
+                Label("New View", systemImage: "plus")
+            }
+            .help("New View…")
+        }
+    }
+}
+
+/// The view tabs and the menu beside them with New View and Edit View.
+private struct ViewTabsWithMenu: View {
+    @Bindable var store: PRStore
     @Binding var editor: EditorSheet?
 
     var body: some View {
-        HStack(spacing: 10) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 6) {
-                    ViewTabs(store: store)
-                    moreMenu
-                }
-                ViewMenu(store: store, editor: $editor)
+        HStack(spacing: 6) {
+            ViewTabs(store: store)
+            Menu {
+                Button("New View…") { editor = .new }
+                Button("Edit View…") { editor = .edit }
+            } label: {
+                Image(systemName: "ellipsis")
             }
-            .layoutPriority(1)
-            Spacer(minLength: 8)
-            LastUpdatedText(store: store)
-            refreshButton
-            FilterField(query: $query, focus: focus)
-            Button { editor = .new } label: {
-                Image(systemName: "plus")
-            }
-            .buttonStyle(.borderless)
-            .help("New View…")
-            .accessibilityLabel("New View")
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background {
-            // ⌘F focuses the filter field from anywhere in the window.
-            Button("Filter") { focus.wrappedValue = .search }
-                .keyboardShortcut("f", modifiers: .command)
-                .opacity(0)
-                .accessibilityHidden(true)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("Views")
+            .accessibilityLabel("View options")
         }
     }
+}
 
-    private var moreMenu: some View {
-        Menu {
-            Button("New View…") { editor = .new }
-            Button("Edit View…") { editor = .edit }
-        } label: {
-            Image(systemName: "ellipsis")
-        }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Views")
-        .accessibilityLabel("View options")
-    }
+private struct RefreshButton: View {
+    let store: PRStore
 
-    private var refreshButton: some View {
+    var body: some View {
+        // ⌘R is on a button in the window's content (see `LanesWindowView`), so it works
+        // wherever focus is; this one shows the state.
         Button { store.refreshNow() } label: {
             ZStack {
                 Image(systemName: "arrow.clockwise").opacity(store.isRefreshing ? 0 : 1)
@@ -226,8 +269,6 @@ private struct LanesBar: View {
             }
             .frame(width: 18, height: 18)
         }
-        .buttonStyle(.borderless)
-        .keyboardShortcut("r", modifiers: .command)
         .disabled(store.isRefreshing || store.viewer == nil)
         .help("Refresh (⌘R)")
         .accessibilityLabel(store.isRefreshing ? "Refreshing" : "Refresh")
@@ -254,6 +295,9 @@ private extension PRStore {
 }
 
 /// The view picker as tabs, like the design: each view's name and its your-move count.
+///
+/// The toolbar's glass shape is the track the tabs sit in, so they draw only the selected
+/// tab's capsule.
 private struct ViewTabs: View {
     @Bindable var store: PRStore
     @Environment(\.colorScheme) private var colorScheme
@@ -269,14 +313,10 @@ private struct ViewTabs: View {
                         Text(choice.name).lineLimit(1)
                         if count > 0 { CountBadge(count: count, prominent: selected) }
                     }
-                    .padding(.horizontal, 9)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
                     .background {
-                        if selected {
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(colorScheme == .dark ? Color.white.opacity(0.16) : Color(nsColor: .controlBackgroundColor))
-                                .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
-                        }
+                        if selected { selection }
                     }
                     .contentShape(Rectangle())
                 }
@@ -285,9 +325,13 @@ private struct ViewTabs: View {
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
-        .padding(2)
-        .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(Color.primary.opacity(0.06)))
         .fixedSize()
+    }
+
+    private var selection: some View {
+        Capsule(style: .continuous)
+            .fill(colorScheme == .dark ? Color.white.opacity(0.16) : Color(nsColor: .controlBackgroundColor))
+            .shadow(color: .black.opacity(0.12), radius: 1, y: 0.5)
     }
 }
 
@@ -340,50 +384,13 @@ private struct LastUpdatedText: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            Group {
-                if store.isRefreshing {
-                    Text("Updating…")
-                } else if let updated = store.lastUpdated {
-                    let ago = Formatting.ago(updated, now: context.date)
-                    Text(ago == "now" ? "Updated just now" : "Updated \(ago)")
-                } else {
-                    Text("Not updated yet")
-                }
-            }
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .fixedSize()
+            Text(LanesToolbarLayout.lastUpdatedText(isRefreshing: store.isRefreshing, lastUpdated: store.lastUpdated, now: context.date))
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 4)
         }
-    }
-}
-
-private struct FilterField: View {
-    @Binding var query: String
-    var focus: FocusState<LanesWindowView.Focus?>.Binding
-
-    var body: some View {
-        HStack(spacing: 4) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-            TextField("Filter", text: $query)
-                .textFieldStyle(.plain)
-                .focused(focus, equals: .search)
-                .onExitCommand { query = ""; focus.wrappedValue = .board }
-                .onKeyPress(.downArrow) { focus.wrappedValue = .board; return .handled }
-                .accessibilityLabel("Filter pull requests")
-            if !query.isEmpty {
-                Button { query = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Clear filter")
-            }
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 4)
-        .frame(width: 180)
-        .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(Color.primary.opacity(0.06)))
-        .help("Filter by title, number, author or repo (⌘F)")
     }
 }
 

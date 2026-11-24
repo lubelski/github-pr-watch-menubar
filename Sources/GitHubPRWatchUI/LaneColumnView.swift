@@ -4,6 +4,9 @@ import SwiftUI
 /// One lane of the main window: a header with its count, then its cards in their own scroll
 /// view. Your move is tinted. The Waiting lane folds drafts into a collapsed group at the end,
 /// and the CI running lane briefly notes PRs that just finished and moved to Your move.
+///
+/// Lanes and cards are content, so they stay plain: no glass. The header floats over the
+/// lane's scroll view with the system's scroll edge effect.
 struct LaneColumnView: View {
     let group: PRStore.LaneGroup
     let viewer: String?
@@ -20,42 +23,11 @@ struct LaneColumnView: View {
     private var drafts: [ClassifiedPR] { lane == .waiting ? group.pullRequests.filter(\.pr.isDraft) : [] }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            header
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 6)
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(movedNotes) { MovedNoteView(note: $0) }
-                        ForEach(cards) { card($0) }
-                        if group.pullRequests.isEmpty && movedNotes.isEmpty {
-                            Text(Self.emptyText(lane))
-                                .font(.callout)
-                                .foregroundStyle(.secondary)
-                                .frame(maxWidth: .infinity)
-                                .padding(.top, 16)
-                        }
-                        if !drafts.isEmpty { draftsGroup }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 8)
-                    .padding(.top, 2)
-                    .animation(reduceMotion ? nil : .snappy, value: group.pullRequests.map(\.id))
-                    .animation(reduceMotion ? nil : .snappy, value: movedNotes.map(\.id))
-                }
-                .scrollIndicators(.automatic)
-                .onChange(of: selectedID) { _, id in
-                    guard let id, group.pullRequests.contains(where: { $0.id == id }) else { return }
-                    if reduceMotion {
-                        proxy.scrollTo(id)
-                    } else {
-                        withAnimation(.snappy) { proxy.scrollTo(id) }
-                    }
-                }
-            }
-        }
+        // The header is a bar over the top of the lane's scroll view, so cards scroll under it
+        // and the system's soft scroll edge effect keeps it legible.
+        cardList
+            .safeAreaBar(edge: .top, spacing: 0) { paddedHeader }
+            .scrollEdgeEffectStyle(.soft, for: .top)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(
             RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -63,6 +35,46 @@ struct LaneColumnView: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(lane.title), \(group.pullRequests.count) pull request\(group.pullRequests.count == 1 ? "" : "s")")
+    }
+
+    private var paddedHeader: some View {
+        header
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+    }
+
+    private var cardList: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(movedNotes) { MovedNoteView(note: $0) }
+                    ForEach(cards) { card($0) }
+                    if group.pullRequests.isEmpty && movedNotes.isEmpty {
+                        Text(Self.emptyText(lane))
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 16)
+                    }
+                    if !drafts.isEmpty { draftsGroup }
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 8)
+                .padding(.top, 2)
+                .animation(reduceMotion ? nil : .snappy, value: group.pullRequests.map(\.id))
+                .animation(reduceMotion ? nil : .snappy, value: movedNotes.map(\.id))
+            }
+            .scrollIndicators(.automatic)
+            .onChange(of: selectedID) { _, id in
+                guard let id, group.pullRequests.contains(where: { $0.id == id }) else { return }
+                if reduceMotion {
+                    proxy.scrollTo(id)
+                } else {
+                    withAnimation(.snappy) { proxy.scrollTo(id) }
+                }
+            }
+        }
     }
 
     private var header: some View {

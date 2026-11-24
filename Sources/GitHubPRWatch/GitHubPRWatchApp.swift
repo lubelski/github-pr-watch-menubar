@@ -13,6 +13,8 @@ struct GitHubPRWatchApp: App {
             MainWindowView(store: services.store, notifier: services.notifier)
         }
         .defaultSize(width: 1100, height: 680)
+        // The title row above the toolbar row, so the centered app name has a row of its own.
+        .windowToolbarStyle(.expanded)
         .defaultLaunchBehavior(services.store.needsOnboarding ? .presented : .suppressed)
 
         MenuBarExtra {
@@ -25,5 +27,6 @@ struct GitHubPRWatchApp: App {
         Settings {
             SettingsView(store: services.store, notifier: services.notifier)
         }
+        .windowResizability(.contentMinSize)
     }
 }

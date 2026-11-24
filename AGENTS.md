@@ -77,4 +77,6 @@ Pitfalls:
 - **Background:** the root view needs `.background(Color(nsColor: .windowBackgroundColor))`, or parts render transparent.
 - **Activation policy:** `DockPresence` changes the policy when the main window appears, but leaves `.prohibited` alone. Keep that guard.
 
+- **Whole windows:** the main window and Settings render with `renderWindow(...)` (`Sources/GitHubPRWatchRender/WindowRenders.swift`), which draws the window's frame view, so the centered title, the toolbar items and their grouping show. The Liquid Glass material itself does not: it needs a window on screen. Judge the glass in the running app.
+
 To render a new view, add a `render(...)` call. Look at every PNG before you call the work done.
