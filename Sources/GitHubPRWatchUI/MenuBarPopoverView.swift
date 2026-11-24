@@ -258,9 +258,9 @@ public struct MenuBarPopoverView: View {
         NSApp.activate()
     }
 
-    /// Onboarding lives in the main window; after a sign-out, signing in is in Settings.
+    /// The main window shows onboarding while signed out, including after a sign-out.
     private func openSetup() {
-        if store.needsOnboarding { openMainWindow() } else { openSettingsTab(.account) }
+        openMainWindow()
     }
 
     private func openSettingsTab(_ tab: SettingsTab?) {
