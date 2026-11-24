@@ -18,7 +18,7 @@ struct GitHubPRWatchApp: App {
         MenuBarExtra {
             MenuBarPopoverView(store: services.store)
         } label: {
-            MenuBarLabel(count: services.store.yourMoveCount)
+            MenuBarItemLabel(services: services)
         }
         .menuBarExtraStyle(.window)
 

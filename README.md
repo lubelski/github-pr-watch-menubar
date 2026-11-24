@@ -13,7 +13,8 @@ It is **read-only**. It shows PRs and sends native notifications. It never merge
 - **Events are transitions** between two polls: CI finished (green and ready, green but blocked, failed with the failing checks, or green and still waiting), entered or dropped from the merge queue, approved, changes requested, review requested from you, and a new PR in the view. The first poll after sign-in only sets a baseline. The last snapshot is saved, so a relaunch doesn't notify again.
 - **The main window shows four lanes**: Your move, CI running, In merge queue, Waiting on others. A view picker chooses which PRs fill them.
 - **Each PR shows a symbol and a plain sentence**, never color alone, such as `2 checks failed: e2e-chrome, lint` or `CI passed · blocked by required-commit`. Whether a PR is "your move" depends on who you are: a green, approved PR is its author's (or assignee's) move, and a review request is the reviewer's.
-- **The menu bar item** gets a numbered badge when something is your move. The popover lists Your move first and keeps Waiting collapsed.
+- **The menu bar item** is a calm glyph until something is your move, then gains a filled badge; it dims while offline or signed out. For about 8 seconds after an event it also names it, such as `#1293 ready to merge`. The popover lists Your move first, newest change on top, and keeps Waiting collapsed behind a one-line summary (`2 in CI, 1 in queue`).
+- **Banners are calm.** A PR with several events in one poll gets one banner, for the most important. A poll that changes many PRs posts at most three banners, the last summing up the rest (`4 more pull requests changed`). A drop from the merge queue waits one poll and notifies only if the PR is still open and still out of the queue, since GitHub can drop the entry briefly while a merge lands. Settings has the master switch, sound, the menu bar label, and a quiet-while-in-front option.
 
 The app is an accessory (menu bar) app. While the main window is open it becomes a regular app with a Dock icon and a place in Command-Tab, and goes back to the menu bar when the window closes. The window opens at launch only until setup is finished.
 
@@ -62,6 +63,8 @@ Settings, views and the last snapshot live in `~/Library/Application Support/Git
   - `Filter.swift`: the rule tree, `SavedView`, `EventKind`, and the starter views.
   - `Transitions.swift`: the transition detector and the saved snapshot.
   - `NotificationWording.swift`: banner text for each event.
+  - `NotificationPlanner.swift`, `QueueDropDebouncer.swift`, `NotificationSettings.swift`: which banners a poll becomes.
+  - `MenuBarSummary.swift`: the menu bar glyph's state and the popover's summaries.
   - `GitHubClient.swift`, `GitHubQueries.swift`: the GraphQL client and its documents.
   - `Auth.swift`, `DeviceFlow.swift`, `Secrets.swift`: the three sign-in paths and the Keychain.
   - `PRStore.swift`: the `@Observable` app model that the UI reads.

@@ -147,16 +147,14 @@ for dark in [false, true] {
     try render("lanes-offline", LanesWindowView(store: offline), size: CGSize(width: 1100, height: 680), dark: dark)
     try render("lanes-rate-limited", LanesWindowView(store: rateLimited), size: CGSize(width: 1100, height: 520), dark: dark)
     try render("lanes-loading", LanesWindowView(store: loading), size: CGSize(width: 1100, height: 520), dark: dark)
-    try render("popover", MenuBarPopoverView(store: watching), dark: dark)
-    try render("settings", SettingsView(store: watching, notifier: notifier), size: CGSize(width: 520, height: 460), dark: dark)
 }
 // Let `.task` and `onAppear` work settle, then draw the onboarding screens again.
 try await Task.sleep(for: .milliseconds(300))
 for dark in [false, true] {
     try render("onboarding-signed-in", OnboardingView(store: signedIn, notifier: notifier), size: CGSize(width: 820, height: 560), dark: dark)
 }
-try writeImage(MenuBarLabel.image(count: 0), name: "menubar-idle")
-try writeImage(MenuBarLabel.image(count: 3), name: "menubar-badge")
+// The menu bar item, the popover in each state, and each Settings section.
+try await MenuBarRenders.renderAll(to: outputDirectory)
 print("your move: \(watching.yourMoveCount)")
 
 /// Wraps an API and reports some repos as unreadable, for the "can't read" banner.
