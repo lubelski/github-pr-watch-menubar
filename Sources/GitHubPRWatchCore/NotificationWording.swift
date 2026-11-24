@@ -11,6 +11,8 @@ public struct NotificationContent: Sendable, Equatable {
     /// Groups banners for the same PR in Notification Center.
     public var threadID: String
     public var identifier: String
+    /// A summary banner: a click opens the app's window instead of `url`, when it can.
+    public var opensApp: Bool = false
 }
 
 public enum NotificationWording {
