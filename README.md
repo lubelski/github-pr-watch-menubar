@@ -47,7 +47,7 @@ A check whose name contains `required-commit` is treated as a guard: when it is 
 
 ## Build
 
-Requires Xcode (for SwiftUI macros). `xcode-select` doesn't need to point at it; the scripts set `DEVELOPER_DIR`.
+Runs on macOS 27 or later. Requires Xcode 27 (for the macOS 27 SDK and SwiftUI macros). `xcode-select` doesn't need to point at it; the scripts set `DEVELOPER_DIR`.
 
 ```sh
 ./scripts/bundle.sh       # builds build/GitHub PR Watch.app

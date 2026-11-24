@@ -2,32 +2,23 @@ import AppKit
 import GitHubPRWatchCore
 import SwiftUI
 
-/// The sections of Settings, in order.
-public enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
-    case account, repos, notifications, views, advanced
-
-    /// Where the selected tab is remembered, so the popover can open a given one.
-    public static let storageKey = "settings.selectedTab"
-
-    public var id: String { rawValue }
-
-    public var title: String {
-        switch self {
-        case .account: "Account"
-        case .repos: "Repos"
-        case .notifications: "Notifications"
-        case .views: "Views"
-        case .advanced: "Advanced"
-        }
-    }
-}
-
 /// Settings: account, watched repos, notifications, views, and polling.
 ///
-/// The sections switch with a segmented control in the content rather than toolbar tabs,
-/// so the window keeps a plain title bar with the static app name centered (toolbar tabs
-/// would retitle the window after each tab).
+/// The layout is the one in the sibling app mac-os-agent (`SettingsRootView` in its
+/// `SettingsWindow.swift`): a sidebar of sections with symbols, at a fixed width, beside the
+/// selected section. It is a plain row rather than a split view, so the sidebar can't be
+/// dragged or collapsed and there is no sidebar button. The sections come from `SettingsTab`
+/// in Core. The title bar says the app's name, centered, the same as the main window, with a
+/// hairline under it. (mac-os-agent titles its window after the section; this app keeps the
+/// app's name so every window says which app it belongs to.)
 public struct SettingsView: View {
+    /// The sidebar's width. It is fixed: the sidebar cannot be dragged wider or collapsed.
+    public static let sidebarWidth: CGFloat = 200
+    /// The window's size when it first opens, and the smallest it can be. The smallest width
+    /// leaves the Views section the 640 points its manage list needs beside the sidebar.
+    public static let idealSize = CGSize(width: 880, height: 600)
+    public static let minimumSize = CGSize(width: 850, height: 480)
+
     let store: PRStore
     let notifier: any Notifier
     let fixedTab: SettingsTab?
@@ -45,19 +36,35 @@ public struct SettingsView: View {
     }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            Picker("Section", selection: selection) {
-                ForEach(SettingsTab.allCases) { Text($0.title).tag($0) }
+        HStack(spacing: 0) {
+            List(selection: Binding<SettingsTab?>(
+                get: { selection.wrappedValue },
+                set: { if let tab = $0 { selection.wrappedValue = tab } }
+            )) {
+                ForEach(SettingsTab.allCases) { tab in
+                    // The sidebar draws the selected row's title in a heavier weight, which
+                    // widens it. A weight on the title's own Text keeps one weight throughout.
+                    Label {
+                        Text(tab.title).fontWeight(.regular)
+                    } icon: {
+                        Image(systemName: tab.symbol)
+                    }
+                    .tag(tab)
+                }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .fixedSize()
-            .padding(.top, 12)
-            .padding(.bottom, 4)
+            .listStyle(.sidebar)
+            .frame(width: Self.sidebarWidth)
+            Divider()
+            // A minimum of zero keeps a section's ideal size from pushing the window or the
+            // sidebar around.
             SettingsPane(store: store, notifier: notifier, tab: selection.wrappedValue)
+                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
         }
-        .frame(width: 560, height: 560)
-        .navigationTitle(AppInfo.name)
+        .frame(
+            minWidth: Self.minimumSize.width, idealWidth: Self.idealSize.width,
+            minHeight: Self.minimumSize.height, idealHeight: Self.idealSize.height
+        )
+        .centeredTitleBar(separator: .line)
     }
 }
 

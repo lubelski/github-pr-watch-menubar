@@ -22,15 +22,15 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/GitHubPRWatch"
 
 # Record the SDK the app was compiled against. SwiftPM's default build engine writes the
-# deployment target (15.0) into the binary's SDK field instead. macOS reads that field to
+# deployment target into the binary's SDK field instead. macOS reads that field to
 # choose between current behavior and a compatibility mode for older apps; in that mode
 # the menu bar panel draws as a flat rectangle and doesn't resize with its content.
 # This is why `swift run` must not be used to try the app. AI-menubar-meter's
 # scripts/bundle.sh has the full investigation.
 #
 # To check a build:  xcrun vtool -show-build <binary>
-# `sdk` must match `xcrun --sdk macosx --show-sdk-version` and differ from `minos`.
-MIN_OS=15.0
+# `sdk` must match `xcrun --sdk macosx --show-sdk-version`.
+MIN_OS=27.0
 SDK_VERSION="$(xcrun --sdk macosx --show-sdk-version)"
 xcrun vtool -set-build-version macos "$MIN_OS" "$SDK_VERSION" -replace \
   -output "$APP/Contents/MacOS/GitHubPRWatch" "$APP/Contents/MacOS/GitHubPRWatch" 2>/dev/null
@@ -85,7 +85,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key><string>$BUILD_NUMBER</string>
   <key>PRWatchGitCommit</key><string>$GIT_COMMIT</string>
-  <key>LSMinimumSystemVersion</key><string>15.0</string>
+  <key>LSMinimumSystemVersion</key><string>$MIN_OS</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.developer-tools</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>

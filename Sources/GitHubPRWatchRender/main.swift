@@ -135,18 +135,27 @@ let manyViews = PRStore(dependencies: .inMemory(
 await manyViews.refresh()
 manyViews.selectedViewID = BuiltInViews.mineID
 
+// The main window as a whole: the centered title, the toolbar, the banners and the lanes.
+// See WindowRenders.swift for what a windowless render can and can't show of the toolbar.
 for dark in [false, true] {
-    try render("lanes-narrow-many-views", LanesWindowView(store: manyViews), size: CGSize(width: 900, height: 480), dark: dark)
     try render("onboarding-signed-out", OnboardingView(store: signedOut, notifier: notifier), size: CGSize(width: 820, height: 560), dark: dark)
     try render("onboarding-signed-in", OnboardingView(store: signedIn, notifier: notifier), size: CGSize(width: 820, height: 560), dark: dark)
-    try render("lanes-mine", LanesWindowView(store: watching), size: CGSize(width: 1100, height: 680), dark: dark)
-    try render("lanes-just-finished", LanesWindowView(store: justFinished), size: CGSize(width: 1100, height: 680), dark: dark)
-    try render("lanes-narrow", LanesWindowView(store: watching), size: CGSize(width: 900, height: 620), dark: dark)
-    try render("lanes-all-views", LanesWindowView(store: allViews), size: CGSize(width: 1440, height: 760), dark: dark)
-    try render("lanes-empty-view", LanesWindowView(store: emptyView), size: CGSize(width: 1100, height: 520), dark: dark)
-    try render("lanes-offline", LanesWindowView(store: offline), size: CGSize(width: 1100, height: 680), dark: dark)
-    try render("lanes-rate-limited", LanesWindowView(store: rateLimited), size: CGSize(width: 1100, height: 520), dark: dark)
-    try render("lanes-loading", LanesWindowView(store: loading), size: CGSize(width: 1100, height: 520), dark: dark)
+    let lanes: [(String, PRStore, CGSize)] = [
+        ("lanes-mine", watching, CGSize(width: 1100, height: 680)),
+        ("lanes-just-finished", justFinished, CGSize(width: 1100, height: 680)),
+        ("lanes-narrow", watching, CGSize(width: 900, height: 620)),
+        ("lanes-narrow-many-views", manyViews, CGSize(width: 900, height: 560)),
+        ("lanes-all-views", allViews, CGSize(width: 1440, height: 760)),
+        ("lanes-empty-view", emptyView, CGSize(width: 1100, height: 600)),
+        ("lanes-offline", offline, CGSize(width: 1100, height: 680)),
+        ("lanes-rate-limited", rateLimited, CGSize(width: 1100, height: 600)),
+        ("lanes-loading", loading, CGSize(width: 1100, height: 600)),
+    ]
+    for (name, store, size) in lanes {
+        try await renderWindow(name, MainWindowView(store: store, notifier: notifier), size: size, dark: dark)
+    }
+    // Onboarding in the window: the title bar only, no toolbar.
+    try await renderWindow("window-onboarding", MainWindowView(store: signedOut, notifier: notifier), size: CGSize(width: 900, height: 600), dark: dark)
 }
 // Let `.task` and `onAppear` work settle, then draw the onboarding screens again.
 try await Task.sleep(for: .milliseconds(300))
