@@ -207,8 +207,8 @@ extension PRStore {
     /// The PRs for a picker choice: one view, or every view for `allViewsID`.
     public func boardPullRequests(for viewID: UUID?) -> [ClassifiedPR] {
         guard viewID == Self.allViewsID else { return pullRequests(in: viewID) }
-        guard let login = viewer?.login else { return [] }
-        return pullRequests.filter { item in views.contains { $0.matches(item.pr, viewer: login) } }
+        guard let context = filterContext else { return [] }
+        return pullRequests.filter { item in views.contains { $0.matches(item.pr, in: context) } }
     }
 
     /// How many PRs in the choice are your move, for the picker's badges.

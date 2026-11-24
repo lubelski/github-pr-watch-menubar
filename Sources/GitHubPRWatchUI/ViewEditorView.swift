@@ -5,6 +5,8 @@ import SwiftUI
 /// smart folders). Shown over the main window.
 ///
 /// - `.manage` (the default): a list of views to reorder, duplicate, delete, edit or add.
+///   It shows its own Done button only when `onDone` is given, so a host that already
+///   has one (a sheet wrapper, a Settings tab) doesn't get two.
 /// - `.edit(id)`: straight to one view's editor.
 /// - `.create(template)`: a new view, from the template chooser when `template` is `nil`.
 ///
@@ -39,7 +41,7 @@ public struct ViewEditorView: View {
         Group {
             switch screen {
             case .list:
-                ManageViewsList(store: store, onEdit: edit, onNew: { screen = .templates }, onDone: finish)
+                ManageViewsList(store: store, onEdit: edit, onNew: { screen = .templates }, onDone: onDone.map { done in { done() } })
             case .templates:
                 TemplateChooser(onPick: create, onCancel: back)
             case .editor(let draft, let isNew, let focusLogins):
@@ -516,7 +518,8 @@ struct ManageViewsList: View {
     let store: PRStore
     let onEdit: (UUID) -> Void
     let onNew: () -> Void
-    let onDone: () -> Void
+    /// `nil` hides the Done button.
+    let onDone: (() -> Void)?
 
     @State private var selection: UUID?
     @State private var pendingDelete: SavedView?
@@ -557,7 +560,9 @@ struct ManageViewsList: View {
                     .foregroundStyle(.secondary)
                     .padding(.leading, 4)
                 Spacer()
-                Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+                if let onDone {
+                    Button("Done", action: onDone).keyboardShortcut(.defaultAction)
+                }
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 12)

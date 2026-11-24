@@ -8,9 +8,9 @@ It is **read-only**. It shows PRs and sends native notifications. It never merge
 
 ## How it works
 
-- **Views are saved filters.** A view is a named rule tree: groups that match all, any, or none of their conditions, on author, assignee, review requested, repo, label, draft, CI state, and merge state. A user condition can name "me" or a list of logins. Four starter views: Mine, Needs my review, Agent PRs, Watchlist.
+- **Views are saved filters.** A view is a named rule tree: groups that match all, any, or none of their conditions, on author, assignee, review requested, repo, label, draft, CI state, merge state, lane, title, and base branch, each with "is", "is not" or "is any of". A user condition can name "me", "my teams" (for review requests) or a list of logins. The view editor builds these as rule rows with one level of nested groups, from templates: Blank, Mine, Needs my review, Watchlist, Agent PRs.
 - **Each view has notification rules**: which events notify for PRs in that view.
-- **Events are transitions** between two polls: CI finished (green and ready, green but blocked, failed with the failing checks, or green and still waiting), entered or dropped from the merge queue, approved, changes requested, review requested from you, and a new PR in the view. The first poll after sign-in only sets a baseline. The last snapshot is saved, so a relaunch doesn't notify again.
+- **Events are transitions** between two polls: CI finished (green and ready, green but blocked, failed with the failing checks, or green and still waiting), entered or dropped from the merge queue, approved, changes requested, review requested from you, and a new PR in the view (counted when it's ready for review, so a draft is silent until it leaves draft). The first poll after sign-in only sets a baseline. The last snapshot is saved, so a relaunch doesn't notify again.
 - **The main window shows four lanes**: Your move, CI running, In merge queue, Waiting on others. A view picker chooses which PRs fill them.
 - **Each PR shows a symbol and a plain sentence**, never color alone, such as `2 checks failed: e2e-chrome, lint` or `CI passed · blocked by required-commit`. Whether a PR is "your move" depends on who you are: a green, approved PR is its author's (or assignee's) move, and a review request is the reviewer's.
 - **The menu bar item** is a calm glyph until something is your move, then gains a filled badge; it dims while offline or signed out. For about 8 seconds after an event it also names it, such as `#1293 ready to merge`. The popover lists Your move first, newest change on top, and keeps Waiting collapsed behind a one-line summary (`2 in CI, 1 in queue`).
@@ -27,6 +27,8 @@ Setup is one screen: sign in, pick starter views, optionally turn on notificatio
 | **Your GitHub CLI login** (offered first when `gh` is installed) | Nowhere in this app. It runs `gh auth token` each time it needs one, so `gh auth refresh` and `gh auth switch` keep working. `gh` is found on `PATH`, then in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`. |
 | **Sign in with GitHub** (OAuth device flow) | The Keychain, service `dev.lubelski.GitHubPRWatch`. Hidden until an OAuth client ID is set in `OAuthConfig.clientID`. |
 | **A pasted token** | The Keychain, same service. |
+
+**Team review requests** need the `read:org` scope (or, for fine-grained tokens and GitHub Apps, the organization Members read permission). With it, a review requested from one of your teams counts as requested from you, in the "Your move" lane and in rules that say "review requested is me or my teams". Without it the app counts requests to you by name only and the view editor says so. `gh auth refresh -s read:org` adds the scope to a GitHub CLI login. Team membership is read once per watched organization and cached for six hours.
 
 The device flow is fully implemented but has no client ID yet. A GitHub App with read-only permissions (Pull requests, Checks, Commit statuses, Contents, Metadata) is preferable to an OAuth App, whose only way to read private repos is the `repo` scope, which also grants write access.
 
@@ -61,6 +63,8 @@ Settings, views and the last snapshot live in `~/Library/Application Support/Git
   - `Models.swift`: `PullRequest`, `CheckRun`, `Repo`, `Viewer`, and GitHub's enums.
   - `PRStatus.swift`: the classifier. Its doc comment has the decision table.
   - `Filter.swift`: the rule tree, `SavedView`, `EventKind`, and the starter views.
+  - `ViewDraft.swift`, `ViewTemplates.swift`: the editable form of a view for the rule builder, its validation, and the templates for new views.
+  - `PRStore+Views.swift`: live preview, autocomplete values, and duplicating views.
   - `Transitions.swift`: the transition detector and the saved snapshot.
   - `NotificationWording.swift`: banner text for each event.
   - `NotificationPlanner.swift`, `QueueDropDebouncer.swift`, `NotificationSettings.swift`: which banners a poll becomes.

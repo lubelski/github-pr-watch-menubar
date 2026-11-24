@@ -198,6 +198,14 @@ import Testing
         #expect(s.preview(review.rule).matches.map(\.id).contains("PR_watch"))
     }
 
+    @Test func allViewsChoiceCountsTeamRequests() async {
+        let review = SavedView(name: "R", rule: FilterRule(match: .all, [.predicate(.reviewRequested(.meOrMyTeams))]))
+        let s = PRStore(dependencies: .inMemory(api: StaticGitHubAPI(teams: ["acme/platform"]), config: config, views: [review]))
+        await s.refresh()
+        #expect(s.boardPullRequests(for: PRStore.allViewsID).map(\.id).contains("PR_watch"))
+        #expect(s.pullRequests(in: review.id).map(\.id).contains("PR_watch"))
+    }
+
     @Test func missingScopeFallsBackToByName() async {
         let s = PRStore(dependencies: .inMemory(api: StaticGitHubAPI(teams: nil), config: config, views: SampleData.views))
         await s.refresh()

@@ -65,7 +65,7 @@ func renderViewEditor() async throws {
     )
     try render("view-editor-templates", ViewEditorView(store: store, mode: .create(nil)), size: CGSize(width: 680, height: 520), dark: true)
     try render("view-editor-validation", ViewEditorForm(store: store, draft: invalid, isNew: true, revealIssues: true), size: CGSize(width: 680, height: 820), dark: true)
-    try render("view-editor-manage", ViewEditorView(store: store, mode: .manage), size: CGSize(width: 680, height: 460), dark: true)
+    try render("view-editor-manage", ViewEditorView(store: store, mode: .manage, onDone: {}), size: CGSize(width: 680, height: 460), dark: true)
     try render("view-editor-teams-missing-scope", ViewEditorForm(store: noTeams, draft: review, isNew: true), size: CGSize(width: 680, height: 700), dark: true)
     try render("view-editor-teams-available", ViewEditorForm(store: store, draft: review, isNew: true), size: CGSize(width: 680, height: 700), dark: false)
 }
