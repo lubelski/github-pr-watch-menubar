@@ -1,5 +1,7 @@
 # GitHub PR Watch
 
+<img src="docs/icon.png" width="128" alt="The GitHub PR Watch app icon: a white pull request mark, two tracks with rings and an arrow pointing back, on indigo">
+
 A macOS menu bar app, with a full window, for people who shepherd a lot of GitHub pull requests.
 Teammates and their coding agents open many PRs, CI takes 15 to 60 minutes, and auto-merge stalls.
 GitHub PR Watch tells you the moment a PR needs you.
@@ -13,7 +15,7 @@ It is **read-only**. It shows PRs and sends native notifications. It never merge
 - **Events are transitions** between two polls: CI finished (green and ready, green but blocked, failed with the failing checks, or green and still waiting), entered or dropped from the merge queue, approved, changes requested, review requested from you, and a new PR in the view (counted when it's ready for review, so a draft is silent until it leaves draft). The first poll after sign-in only sets a baseline. The last snapshot is saved, so a relaunch doesn't notify again.
 - **The main window shows four lanes**: Your move, CI running, In merge queue, Waiting on others. A view picker chooses which PRs fill them.
 - **Each PR shows a symbol and a plain sentence**, never color alone, such as `2 checks failed: e2e-chrome, lint` or `CI passed · blocked by required-commit`. Whether a PR is "your move" depends on who you are: a green, approved PR is its author's (or assignee's) move, and a review request is the reviewer's.
-- **The menu bar item** is a calm glyph until something is your move, then gains a filled badge; it dims while offline or signed out. For about 8 seconds after an event it also names it, such as `#1293 ready to merge`. The popover lists Your move first, newest change on top, and keeps Waiting collapsed behind a one-line summary (`2 in CI, 1 in queue`).
+- **The menu bar item** is the app's pull request mark, calm until something is your move, then a filled badge appears beside it; it dims while offline or signed out. For about 8 seconds after an event it also names it, such as `#1293 ready to merge`. The popover lists Your move first, newest change on top, and keeps Waiting collapsed behind a one-line summary (`2 in CI, 1 in queue`).
 - **Banners are calm.** A PR with several events in one poll gets one banner, for the most important. A poll that changes many PRs posts at most three banners, the last summing up the rest (`4 more pull requests changed`). A drop from the merge queue waits one poll and notifies only if the PR is still open and still out of the queue, since GitHub can drop the entry briefly while a merge lands. Settings has the master switch, sound, the menu bar label, and a quiet-while-in-front option.
 
 The app is an accessory (menu bar) app. While the main window is open it becomes a regular app with a Dock icon and a place in Command-Tab, and goes back to the menu bar when the window closes. The window opens at launch only until setup is finished.
@@ -55,6 +57,26 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 
 Run the app from the bundle that `bundle.sh` builds, not with `swift run`. `swift build` records the wrong SDK version in the binary, and macOS then runs the app in a compatibility mode. The comments in `scripts/bundle.sh` explain.
 
+### Icons
+
+The app icon is `Resources/AppIcon.icon`, an Icon Composer file that `bundle.sh` compiles into `Assets.car` and `AppIcon.icns`. Its artwork comes from `AppIconDrawing.swift` and `PullRequestMark.swift`, the same code that draws the menu bar icon and the onboarding header. After changing the drawing, redraw the artwork and the pictures in `docs/`:
+
+```sh
+./scripts/render-icon.sh
+```
+
+`docs/icon.png` is a picture of the compiled icon for this README. `docs/icon-appearances.png`, `docs/icon-sizes.png` and `docs/icon-candidates.png` show it in each appearance, at each size, and next to the designs it was chosen from. None of them is used by the build.
+
+`docs/menubar-icon.png` shows the menu bar icon in each state on light and dark menu bars, and `docs/menubar-icon-1x.png` its pixels at 1× and 2×. After changing how it looks, redraw them:
+
+```sh
+./scripts/render-menubar-icon.sh
+```
+
+<img src="docs/menubar-icon.png" width="560" alt="The menu bar icon on light and dark menu bars: calm, with a badge for your move, with an event label, and dimmed for offline or signed out">
+
+The mark is based on the [Octicons](https://github.com/primer/octicons) `git-pull-request` icon (MIT), redrawn in code.
+
 Settings, views and the last snapshot live in `~/Library/Application Support/GitHub PR Watch/` as `config.json`, `views.json` and `snapshot.json`.
 
 ## Layout
@@ -68,7 +90,8 @@ Settings, views and the last snapshot live in `~/Library/Application Support/Git
   - `Transitions.swift`: the transition detector and the saved snapshot.
   - `NotificationWording.swift`: banner text for each event.
   - `NotificationPlanner.swift`, `QueueDropDebouncer.swift`, `NotificationSettings.swift`: which banners a poll becomes.
-  - `MenuBarSummary.swift`: the menu bar glyph's state and the popover's summaries.
+  - `MenuBarSummary.swift`: the menu bar icon's state and the popover's summaries.
+  - `PullRequestMark.swift`, `AppIconDrawing.swift`: the app's mark and the app icon's artwork.
   - `GitHubClient.swift`, `GitHubQueries.swift`: the GraphQL client and its documents.
   - `Auth.swift`, `DeviceFlow.swift`, `Secrets.swift`: the three sign-in paths and the Keychain.
   - `PRStore.swift`: the `@Observable` app model that the UI reads.
