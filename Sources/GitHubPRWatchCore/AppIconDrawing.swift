@@ -13,15 +13,13 @@ public enum AppIconDrawing {
     public static let canvas: CGFloat = 1024
 
     /// The design in `Resources/AppIcon.icon`.
-    public static let shipped = Design.indigo
+    public static let shipped = Design.openGreen
 
     public enum Design: Int, CaseIterable, Sendable {
         /// Indigo, from the placeholder the onboarding header used before there was an icon.
-        /// The shipped design. It is close to the purple GitHub gives a merged pull request,
-        /// without copying it, and differs from the sibling apps' teal, violet, and graphite.
-        /// Green reads as "open" and graphite disappears in a dark Dock.
         case indigo = 1
-        /// The green GitHub gives an open pull request.
+        /// The shipped design: the green GitHub gives an open pull request. Chosen by the owner
+        /// from the three candidates in `docs/icon-candidates.png`.
         case openGreen = 2
         /// Near black, the mark alone.
         case graphite = 3
