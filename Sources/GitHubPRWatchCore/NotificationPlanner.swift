@@ -109,7 +109,7 @@ extension NotificationWording {
         case .droppedFromMergeQueue: "dropped from queue"
         case .approved: "approved"
         case .changesRequested: "changes requested"
-        case .reviewRequested: "needs your review"
+        case .reviewRequested: "review requested"
         case .newMatch: "new in \(event.viewName)"
         }
         return "\(ref) \(what)"

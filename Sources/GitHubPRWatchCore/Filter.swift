@@ -133,7 +133,8 @@ public enum Predicate: Codable, Sendable, Equatable, Hashable {
     case titleContains(String)
     /// The base branch is any of these. Case-sensitive, as git is.
     case baseBranch([String])
-    /// The PR's lane for the viewer is any of these.
+    /// The PR's lane is any of these. Views saved with the old lanes are rewritten on load by
+    /// `LegacyLaneMigration`.
     case lane([Lane])
 
     /// Whether the PR matches. `nil` means the predicate needs check detail the PR doesn't have.
@@ -168,10 +169,10 @@ public enum Predicate: Codable, Sendable, Equatable, Hashable {
             return branches.contains(pr.baseRef)
         case .lane(let lanes):
             if let lane = context.lanes[pr.id] { return lanes.contains(lane) }
-            // Without check detail the classifier can't tell a failing or running PR from a
-            // waiting one, unless the PR is a draft or queued, which decide the lane first.
+            // Without check detail the classifier can't tell a failing or running PR from one
+            // in review, unless the PR is a draft or queued, which decide the lane first.
             if pr.currentChecks == nil, !pr.isDraft, pr.mergeQueueEntry == nil { return nil }
-            return lanes.contains(PRClassifier.classify(pr, viewer: viewer, context: context.classification).lane)
+            return lanes.contains(PRClassifier.classify(pr, context: context.classification).lane)
         case .repo(let repos):
             return repos.contains { $0.caseInsensitiveCompare(pr.repo) == .orderedSame }
         case .label(let labels):

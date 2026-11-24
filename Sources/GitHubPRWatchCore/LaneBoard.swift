@@ -1,12 +1,12 @@
 import Foundation
 
-/// The pure logic behind the main window's four lanes: what fills them, in what order, which
+/// The pure logic behind the main window's five lanes: what fills them, in what order, which
 /// cards are highlighted because CI just finished, search, and keyboard movement between cards.
 /// The SwiftUI view only draws what this returns.
 public enum LaneBoard {
-    /// How long a PR whose CI just finished stays highlighted in Your move.
+    /// How long a PR whose CI just finished stays highlighted, in whatever lane it landed in.
     public static let justFinishedWindow: TimeInterval = 15 * 60
-    /// How long the "finished, moved to Your move" note stays in the CI running lane.
+    /// How long the "finished, moved to <lane>" note stays in the CI running lane.
     public static let movedNoteWindow: TimeInterval = 90
 
     /// Events that mean "CI finished on this PR".
@@ -31,61 +31,56 @@ public enum LaneBoard {
         return result
     }
 
-    /// A PR that just left the CI running lane for Your move, for the short note left behind.
+    /// A PR that just left the CI running lane, for the short note left behind. `lane` is
+    /// where it went.
     public struct MovedNote: Identifiable, Equatable, Sendable {
         public var prID: String
         public var shortRef: String
+        public var lane: Lane
         public var at: Date
         public var id: String { prID }
+
+        /// `moved to Failing`.
+        public var destinationText: String { "moved to \(lane.title)" }
     }
 
-    /// Notes for PRs whose CI finished within `window` and that are now in Your move.
+    /// Notes for PRs whose CI finished within `window` and that have left CI running.
     public static func movedNotes(
         justFinished: [String: Date], board: [ClassifiedPR], now: Date, window: TimeInterval = movedNoteWindow
     ) -> [MovedNote] {
         board
-            .filter { $0.info.lane == .yourMove }
+            .filter { $0.info.lane != .ciRunning }
             .compactMap { item in
                 guard let at = justFinished[item.pr.id], now.timeIntervalSince(at) <= window else { return nil }
-                return MovedNote(prID: item.pr.id, shortRef: "#\(item.pr.number)", at: at)
+                return MovedNote(prID: item.pr.id, shortRef: "#\(item.pr.number)", lane: item.info.lane, at: at)
             }
             .sorted { $0.at > $1.at }
     }
 
     // MARK: Lanes and order
 
-    /// The four lanes, always all four and in order, each sorted by `sorted(_:in:justFinished:now:)`.
-    public static func lanes(_ prs: [ClassifiedPR], justFinished: [String: Date] = [:], now: Date) -> [PRStore.LaneGroup] {
+    /// The five lanes, always all five and in order, each sorted by `sorted(_:in:justFinished:)`.
+    public static func lanes(_ prs: [ClassifiedPR], justFinished: [String: Date] = [:]) -> [PRStore.LaneGroup] {
         Lane.allCases.map { lane in
-            PRStore.LaneGroup(lane: lane, pullRequests: sorted(prs.filter { $0.info.lane == lane }, in: lane, justFinished: justFinished, now: now))
+            PRStore.LaneGroup(lane: lane, pullRequests: sorted(prs.filter { $0.info.lane == lane }, in: lane, justFinished: justFinished))
         }
     }
 
-    /// Order within a lane. The most actionable, or most recently changed, card is on top.
+    /// Order within a lane.
     ///
-    /// - **Your move**: PRs whose CI just finished come first, newest finish first. Then by
-    ///   how recently the PR changed (`changedAt`), newest first. Recency beats a fixed ranking
-    ///   of states here: everything in this lane needs you, and the newest thing is the one
-    ///   you haven't seen yet.
     /// - **CI running**: longest running first, since it is closest to finishing. PRs without
     ///   a start time (queued) go last.
-    /// - **In merge queue**: by queue position, front of the queue first.
-    /// - **Waiting on others**: non-drafts before drafts, then most recently changed first.
+    /// - **Merge queue**: by queue position, front of the queue first.
+    /// - **Failing, In review, Ready to merge**: PRs whose CI just finished first, newest finish
+    ///   first, so the highlighted cards are on top. Then most recently changed (`changedAt`)
+    ///   first. In review puts drafts after everything else, since they fold into a group.
     ///
     /// Ties fall back to repo and number, so the order is stable between polls.
-    public static func sorted(_ prs: [ClassifiedPR], in lane: Lane, justFinished: [String: Date] = [:], now: Date) -> [ClassifiedPR] {
+    public static func sorted(_ prs: [ClassifiedPR], in lane: Lane, justFinished: [String: Date] = [:]) -> [ClassifiedPR] {
         func tiebreak(_ a: ClassifiedPR, _ b: ClassifiedPR) -> Bool {
             (a.pr.repo, a.pr.number) < (b.pr.repo, b.pr.number)
         }
         switch lane {
-        case .yourMove:
-            return prs.sorted { a, b in
-                let fa = justFinished[a.pr.id], fb = justFinished[b.pr.id]
-                if (fa != nil) != (fb != nil) { return fa != nil }
-                if let fa, let fb, fa != fb { return fa > fb }
-                let ca = changedAt(a.pr), cb = changedAt(b.pr)
-                return ca != cb ? ca > cb : tiebreak(a, b)
-            }
         case .ciRunning:
             return prs.sorted { a, b in
                 let sa = runningSince(a.pr), sb = runningSince(b.pr)
@@ -96,14 +91,17 @@ public enum LaneBoard {
                 default: return tiebreak(a, b)
                 }
             }
-        case .inMergeQueue:
+        case .mergeQueue:
             return prs.sorted { a, b in
                 let pa = a.pr.mergeQueueEntry?.position ?? .max, pb = b.pr.mergeQueueEntry?.position ?? .max
                 return pa != pb ? pa < pb : tiebreak(a, b)
             }
-        case .waiting:
+        case .failing, .inReview, .readyToMerge:
             return prs.sorted { a, b in
                 if a.pr.isDraft != b.pr.isDraft { return !a.pr.isDraft }
+                let fa = justFinished[a.pr.id], fb = justFinished[b.pr.id]
+                if (fa != nil) != (fb != nil) { return fa != nil }
+                if let fa, let fb, fa != fb { return fa > fb }
                 let ca = changedAt(a.pr), cb = changedAt(b.pr)
                 return ca != cb ? ca > cb : tiebreak(a, b)
             }
@@ -211,8 +209,8 @@ extension PRStore {
         return pullRequests.filter { item in views.contains { $0.matches(item.pr, in: context) } }
     }
 
-    /// How many PRs in the choice are your move, for the picker's badges.
-    public func yourMoveCount(for viewID: UUID?) -> Int {
-        boardPullRequests(for: viewID).filter { $0.info.lane == .yourMove }.count
+    /// How many open PRs the choice holds, drafts left out, for the picker's counts.
+    public func openCount(for viewID: UUID?) -> Int {
+        boardPullRequests(for: viewID).filter { !$0.pr.isDraft }.count
     }
 }

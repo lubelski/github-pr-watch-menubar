@@ -3,8 +3,8 @@ import SwiftUI
 
 /// The main window (Figma row 1B, "Lanes by state"): the view picker, last update, Refresh,
 /// New View and a filter field in the window's toolbar; banners for connection trouble under
-/// it; then four lanes by state (Your move, CI running, In merge queue, Waiting on others),
-/// each scrolling on its own.
+/// it; then five lanes by GitHub's state, in pipeline order (CI running, Failing, In review,
+/// Ready to merge, Merge queue), each scrolling on its own.
 ///
 /// The controls are real toolbar items, so the system draws them in Liquid Glass, and the
 /// filter is the toolbar's own search field. The title bar above them says the app's name,
@@ -33,6 +33,9 @@ public struct LanesWindowView: View {
         self.store = store
     }
 
+    /// The narrowest the window gets. Below this the cards in five lanes lose the PR number.
+    public static let minimumWidth: CGFloat = 1040
+
     public var body: some View {
         VStack(spacing: 0) {
             LanesBanners(store: store)
@@ -40,7 +43,8 @@ public struct LanesWindowView: View {
                 content(board(now: context.date))
             }
         }
-        .frame(minWidth: 900, minHeight: 480)
+        // Five lanes need about 200 points each for a card's `acme/web #4821 · author` line.
+        .frame(minWidth: Self.minimumWidth, minHeight: 480)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .toolbar {
             LanesToolbar(
@@ -95,7 +99,7 @@ public struct LanesWindowView: View {
             .filter { !opened.contains($0.key) }
         let shown = all.filter { LaneBoard.matches($0, query: query) }
         return Board(
-            lanes: LaneBoard.lanes(shown, justFinished: justFinished, now: now),
+            lanes: LaneBoard.lanes(shown, justFinished: justFinished),
             justFinished: justFinished,
             movedNotes: LaneBoard.movedNotes(justFinished: justFinished, board: shown, now: now),
             unfilteredCount: all.count
@@ -105,7 +109,7 @@ public struct LanesWindowView: View {
     /// Card IDs per lane, as the keyboard sees them: collapsed drafts are skipped.
     private func columns(_ board: Board) -> [[String]] {
         board.lanes.map { group in
-            group.pullRequests.filter { showDrafts || group.lane != .waiting || !$0.pr.isDraft }.map(\.id)
+            group.pullRequests.filter { showDrafts || group.lane != .inReview || !$0.pr.isDraft }.map(\.id)
         }
     }
 
@@ -152,7 +156,7 @@ public struct LanesWindowView: View {
     }
 
     private func lanes(_ board: Board) -> some View {
-        HStack(alignment: .top, spacing: 10) {
+        HStack(alignment: .top, spacing: 8) {
             ForEach(board.lanes) { group in
                 LaneColumnView(
                     group: group,
@@ -294,7 +298,8 @@ private extension PRStore {
     }
 }
 
-/// The view picker as tabs, like the design: each view's name and its your-move count.
+/// The view picker as tabs, like the design: each view's name and how many open PRs it holds,
+/// drafts left out.
 ///
 /// The toolbar's glass shape is the track the tabs sit in, so they draw only the selected
 /// tab's capsule.
@@ -307,7 +312,7 @@ private struct ViewTabs: View {
         HStack(spacing: 2) {
             ForEach(store.viewChoices) { choice in
                 let selected = isSelected(choice.id)
-                let count = store.yourMoveCount(for: choice.id)
+                let count = store.openCount(for: choice.id)
                 Button { store.selectedViewID = choice.id } label: {
                     HStack(spacing: 5) {
                         Text(choice.name).lineLimit(1)
@@ -321,7 +326,7 @@ private struct ViewTabs: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("\(choice.name), \(count) your move")
+                .accessibilityLabel("\(choice.name), \(count) open")
                 .accessibilityAddTraits(selected ? .isSelected : [])
             }
         }
@@ -346,7 +351,7 @@ private struct ViewMenu: View {
         Menu {
             ForEach(store.viewChoices) { choice in
                 Toggle(isOn: Binding(get: { isSelected(choice.id) }, set: { if $0 { store.selectedViewID = choice.id } })) {
-                    Label("\(choice.name) · \(store.yourMoveCount(for: choice.id)) your move", systemImage: choice.symbol)
+                    Label("\(choice.name) · \(store.openCount(for: choice.id)) open", systemImage: choice.symbol)
                 }
             }
             Divider()
@@ -355,7 +360,7 @@ private struct ViewMenu: View {
         } label: {
             HStack(spacing: 5) {
                 Text(current?.name ?? "Views")
-                if let current { CountBadge(count: store.yourMoveCount(for: current.id), prominent: true) }
+                if let current { CountBadge(count: store.openCount(for: current.id), prominent: true) }
             }
         }
         .fixedSize()
@@ -371,6 +376,8 @@ private struct CountBadge: View {
         Text("\(count)")
             .font(.caption2.weight(.semibold))
             .monospacedDigit()
+            .lineLimit(1)
+            .fixedSize()
             .foregroundStyle(prominent ? Color.white : Color.secondary)
             .padding(.horizontal, 5)
             .frame(minWidth: 16, minHeight: 16)

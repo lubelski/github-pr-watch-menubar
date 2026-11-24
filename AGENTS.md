@@ -18,7 +18,7 @@ Feature work happens in parallel, so each UI feature has its own file in `Source
 
 | File | Feature |
 |---|---|
-| `LanesWindowView.swift` | The main window's lanes |
+| `LanesWindowView.swift`, `LaneColumnView.swift` | The main window's lanes |
 | `MenuBarPopoverView.swift` | The menu bar popover |
 | `ViewEditorView.swift` | The filter builder for views |
 | `SettingsView.swift` | Settings: the sidebar and the Account, Repos, Notifications, and Advanced sections |
@@ -31,6 +31,8 @@ Feature work happens in parallel, so each UI feature has its own file in `Source
 Shared pieces live in their own files: `PRRowView.swift`, `StatusStyle.swift`, `ConnectionStatusView.swift`, `MenuBarLabel.swift`, `Avatar.swift`, `MainWindowView.swift`, `AppServices.swift`. Don't put shared code in a feature file. Logic and wording belong in Core, where they can be tested.
 
 ## Rules
+
+- **Lanes are GitHub's facts.** A PR's lane comes from what GitHub reports and is the same for every viewer. Don't add lanes or wording that guess who should act; ownership belongs in views. The decision table is in `PRStatus.swift`, with one test per row.
 
 - **Read-only.** Never add code that writes to GitHub: no merging, re-running, approving, commenting.
 - **Placeholder data only.** Fixtures, tests, sample data and screenshots use placeholder people and repos, such as Riley Chen (`rchen`), `jlin-agent`, `apark`, `acme/web`, `acme/api`. Never real names, emails, companies, or tokens. Fixtures copied from live responses must be scrubbed first.

@@ -34,10 +34,11 @@ public enum StatusStyle {
 
     public static func symbol(for lane: Lane) -> String {
         switch lane {
-        case .yourMove: "hand.point.right"
         case .ciRunning: "arrow.trianglehead.2.clockwise.rotate.90"
-        case .inMergeQueue: "arrow.triangle.merge"
-        case .waiting: "clock"
+        case .failing: "xmark.circle"
+        case .inReview: "eye"
+        case .readyToMerge: "checkmark.circle"
+        case .mergeQueue: "arrow.triangle.merge"
         }
     }
 }

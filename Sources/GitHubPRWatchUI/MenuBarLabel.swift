@@ -3,7 +3,7 @@ import GitHubPRWatchCore
 import SwiftUI
 
 /// The menu bar item (Figma row 3B): the app's pull request mark, which stays calm until
-/// something needs you, then gains a filled badge. Offline or signed out, it dims. Right
+/// something changes since you last looked, then gains a filled badge. Offline or signed out, it dims. Right
 /// after an event a short label such as `#1293 ready to merge` sits next to it for a few
 /// seconds.
 ///
@@ -33,7 +33,7 @@ public struct MenuBarLabel: View {
         let look: MenuBarIcon.Look = switch indicator {
         case .signedOut, .offline: .dimmed
         case .calm: .calm
-        case .needsYou: .badged
+        case .changed: .badged
         }
         let image = MenuBarIcon.image(look, label: label)
         image.accessibilityDescription = indicator.accessibilityText
@@ -55,7 +55,7 @@ public struct MenuBarItemLabel: View {
         let store = services.store
         let indicator = MenuBarIndicator.make(
             isSignedIn: store.viewer != nil, needsOnboarding: store.needsOnboarding,
-            connection: store.connection, yourMoveCount: store.yourMoveCount
+            connection: store.connection, hasChanges: services.activity.changes.isOn
         )
         MenuBarLabel(indicator: indicator, transientLabel: services.activity.transientLabel)
             .task {
