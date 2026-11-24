@@ -34,8 +34,8 @@ public struct LanesWindowView: View {
             }
         }
         .frame(minWidth: 900, minHeight: 480)
-        .sheet(item: $editor) { _ in
-            ViewEditorSheet(store: store)
+        .sheet(item: $editor) { sheet in
+            ViewEditorSheet(store: store, sheet: sheet)
         }
         .onAppear { focus = .board }
     }
@@ -157,7 +157,7 @@ public struct LanesWindowView: View {
     @Environment(\.openURL) private var openURL
 }
 
-/// Which editor sheet is open. Both use `ViewEditorView`'s existing initializer.
+/// Which editor sheet is open.
 enum EditorSheet: String, Identifiable {
     case new, edit
     var id: String { rawValue }
@@ -494,21 +494,27 @@ private struct Placeholder<Actions: View>: View {
     }
 }
 
-/// `ViewEditorView` in a sheet, with a Done button.
+/// `ViewEditorView` in a sheet. New opens the template chooser. Edit opens the selected view,
+/// or the manage list when the selection is not a saved view (the "All" tab).
 private struct ViewEditorSheet: View {
     let store: PRStore
+    let sheet: EditorSheet
     @Environment(\.dismiss) private var dismiss
 
-    var body: some View {
-        VStack(spacing: 0) {
-            ViewEditorView(store: store)
-            Divider()
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
+    private var mode: ViewEditorView.Mode {
+        switch sheet {
+        case .new:
+            return .create(nil)
+        case .edit:
+            if let id = store.selectedViewID, store.views.contains(where: { $0.id == id }) {
+                return .edit(id)
             }
-            .padding(12)
+            return .manage
         }
-        .frame(minWidth: 560, idealWidth: 640, minHeight: 480, idealHeight: 620)
+    }
+
+    var body: some View {
+        ViewEditorView(store: store, mode: mode, onDone: { dismiss() })
+            .frame(minWidth: 560, idealWidth: 640, minHeight: 480, idealHeight: 620)
     }
 }

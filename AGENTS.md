@@ -10,7 +10,7 @@ Work in your own git worktree under `./.wt/`, numbered like `./.wt/wt-01/`, on a
 git worktree add .wt/wt-01 -b my-task
 ```
 
-`/.wt/` is in `.gitignore`. Commit as you go. This repo has no remote yet, so don't push or create one unless asked.
+`/.wt/` is in `.gitignore`. Commit as you go. Push your branch to `origin` (`lubelski/github-pr-watch-menubar`) and open a PR. The lead session reviews and merges.
 
 ## Who owns which file
 
