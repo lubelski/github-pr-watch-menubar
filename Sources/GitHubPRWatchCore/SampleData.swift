@@ -15,6 +15,9 @@ public enum SampleData {
 
     public static let agentLogin = "jlin-agent"
 
+    /// The sample viewer's teams.
+    public static let teams: Set<String> = ["acme/platform"]
+
     /// Starter views with the agent and watchlist filled in.
     public static var views: [SavedView] {
         [BuiltInViews.mine, BuiltInViews.needsMyReview, BuiltInViews.agentPRs([agentLogin]), BuiltInViews.watchlist(["tbrandt", "nhaddad"])]
@@ -116,12 +119,27 @@ public actor StaticGitHubAPI: GitHubAPI {
     public var rateLimit: RateLimit?
     /// Thrown by every call while set.
     public var error: GitHubError?
+    /// The viewer's teams, as `org/slug`. `nil` acts like a token without `read:org`.
+    public var teams: Set<String>?
 
-    public init(viewer: Viewer = SampleData.viewer, repos: [Repo] = SampleData.repos, prs: [PullRequest] = SampleData.pullRequests(), rateLimit: RateLimit? = nil) {
+    public init(
+        viewer: Viewer = SampleData.viewer, repos: [Repo] = SampleData.repos, prs: [PullRequest] = SampleData.pullRequests(),
+        rateLimit: RateLimit? = nil, teams: Set<String>? = []
+    ) {
         self.viewerValue = viewer
         self.repos = repos
         self.prs = prs
         self.rateLimit = rateLimit
+        self.teams = teams
+    }
+
+    public func set(teams: Set<String>?) { self.teams = teams }
+
+    public func viewerTeams(login: String, organizations: [String]) async throws -> TeamMemberships {
+        if let error { throw error }
+        guard let teams else { return TeamMemberships(teams: [], missingScope: true) }
+        let orgs = Set(organizations.map { $0.lowercased() })
+        return TeamMemberships(teams: teams.filter { orgs.contains(String($0.lowercased().split(separator: "/").first ?? "")) })
     }
 
     public func set(prs: [PullRequest]) { self.prs = prs }

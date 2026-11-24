@@ -123,16 +123,20 @@ public struct ClassificationContext: Sendable {
     public var guardCheckPatterns: [String]
     /// Merge queue drops the transition detector has seen, by PR ID.
     public var queueDrops: [String: QueueDrop]
+    /// The viewer's teams as lowercased `org/slug`. A review requested from one of them
+    /// counts as requested from the viewer. Empty when the token can't read teams.
+    public var viewerTeams: Set<String>
 
     public static let defaultGuardCheckPatterns = ["required-commit"]
 
     public init(
         now: Date = Date(), guardCheckPatterns: [String] = Self.defaultGuardCheckPatterns,
-        queueDrops: [String: QueueDrop] = [:]
+        queueDrops: [String: QueueDrop] = [:], viewerTeams: Set<String> = []
     ) {
         self.now = now
         self.guardCheckPatterns = guardCheckPatterns
         self.queueDrops = queueDrops
+        self.viewerTeams = Set(viewerTeams.map { $0.lowercased() })
     }
 
     func isGuard(_ check: CheckRun) -> Bool {
@@ -151,7 +155,7 @@ public struct ClassificationContext: Sendable {
 /// | 1  | Draft                                                        | draft                          | waiting        | waiting            |
 /// | 2  | Has a merge queue entry                                      | inMergeQueue                   | inMergeQueue   | inMergeQueue       |
 /// | 3  | Dropped from the queue, same head commit as when it dropped  | droppedFromMergeQueue          | yourMove       | waiting            |
-/// | 4  | Review requested from the viewer by name (viewer not author) | reviewRequestedFromYou         | yourMove       | yourMove           |
+/// | 4  | Review requested from the viewer or a team of theirs (not author) | reviewRequestedFromYou    | yourMove       | yourMove           |
 /// | 5  | Mergeable is CONFLICTING or merge state is DIRTY             | mergeConflicts                 | yourMove       | waiting            |
 /// | 6  | A check other than a guard failed                            | ciFailed                       | yourMove       | waiting            |
 /// | 7  | A check is still running                                     | ciRunning                      | ciRunning      | ciRunning          |
@@ -200,7 +204,7 @@ public enum PRClassifier {
             return info(.droppedFromMergeQueue(reason: drop.reason, at: drop.at), ownerLane, "Dropped from merge queue", parts.joined(separator: " · "))
         }
         // 4
-        if pr.requestsReview(from: viewer), !pr.isAuthored(by: viewer) {
+        if pr.requestsReview(from: viewer, orTeams: context.viewerTeams), !pr.isAuthored(by: viewer) {
             let who = pr.author ?? "Someone"
             return info(.reviewRequestedFromYou(author: pr.author), .yourMove, "Review requested from you", "\(who) · \(Formatting.ago(pr.updatedAt, now: now))")
         }

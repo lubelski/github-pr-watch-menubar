@@ -39,6 +39,27 @@ public protocol GitHubAPI: Sendable {
     func checkDetails(for prs: [PullRequest]) async throws -> [String: CheckSummary]
     /// The budget after the most recent query.
     func latestRateLimit() async -> RateLimit?
+    /// The viewer's teams in the given organizations, for review requests made to a team.
+    func viewerTeams(login: String, organizations: [String]) async throws -> TeamMemberships
+}
+
+extension GitHubAPI {
+    /// Fakes that don't know about teams answer "can't tell", so callers fall back to by-name.
+    public func viewerTeams(login: String, organizations: [String]) async throws -> TeamMemberships {
+        TeamMemberships(teams: [], missingScope: true)
+    }
+}
+
+/// The teams the viewer is on, as lowercased `org/slug`.
+public struct TeamMemberships: Sendable, Equatable {
+    public var teams: Set<String>
+    /// The token can't read team membership (no `read:org`). `teams` is then empty or partial.
+    public var missingScope: Bool
+
+    public init(teams: Set<String>, missingScope: Bool = false) {
+        self.teams = Set(teams.map { $0.lowercased() })
+        self.missingScope = missingScope
+    }
 }
 
 /// GitHub's GraphQL API over an injectable transport.
@@ -134,6 +155,40 @@ public actor GitHubClient: GitHubAPI {
             }
         }
         return result
+    }
+
+    public func viewerTeams(login: String, organizations: [String]) async throws -> TeamMemberships {
+        struct Data: Decodable {
+            struct Org: Decodable { let teams: Connection<Slug>? }
+            struct Slug: Decodable { let slug: String }
+            let organization: Org?
+        }
+        var teams = Set<String>()
+        for org in organizations {
+            var cursor: String?
+            do {
+                repeat {
+                    let data: Data = try await query(GitHubQueries.viewerTeams, variables: ["org": org, "login": login, "cursor": cursor])
+                    guard let connection = data.organization?.teams else { break }
+                    teams.formUnion(connection.nodes.compactMap { $0.map { "\(org)/\($0.slug)".lowercased() } })
+                    cursor = connection.pageInfo.hasNextPage ? connection.pageInfo.endCursor : nil
+                } while cursor != nil
+            } catch GitHubError.graphQL(let messages) {
+                if messages.contains(where: Self.isMissingScope) {
+                    return TeamMemberships(teams: teams, missingScope: true)
+                }
+                // A user account rather than an organization (NOT_FOUND), or an organization
+                // that hides itself from this token (SAML, IP allow list): no teams there.
+                continue
+            }
+        }
+        return TeamMemberships(teams: teams)
+    }
+
+    /// GitHub's wording when the token lacks `read:org` or the Members permission.
+    static func isMissingScope(_ message: String) -> Bool {
+        let text = message.lowercased()
+        return text.contains("read:org") || text.contains("required scopes") || text.contains("not accessible by integration")
     }
 
     // MARK: - Transport

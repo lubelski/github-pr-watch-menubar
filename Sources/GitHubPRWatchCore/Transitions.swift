@@ -93,6 +93,9 @@ public struct PREvent: Codable, Sendable, Equatable, Hashable, Identifiable {
 ///   through unchanged, so they don't look closed.
 /// - Each PR event goes to the first view (in the given order) that the PR matches now and
 ///   whose rules include the event. `newMatch` goes to every view that gained the PR.
+/// - `newMatch` counts only PRs that are ready for review. A draft that matches a view is
+///   silent; it counts as new when it leaves draft, as if it opened then. So a Watchlist
+///   fires when a teammate's PR becomes ready, not while they are still working on it.
 /// - CI "finished" means: the current head has check detail, at least one check, and none
 ///   running; and the previous poll had check detail with a check running on the same head,
 ///   or had detail for a different head. A re-run on the same head notifies again.
@@ -108,14 +111,22 @@ public struct TransitionDetector: Sendable {
         self.maxSnapshotAge = maxSnapshotAge
     }
 
+    /// `viewerTeams` (lowercased `org/slug`) makes a review requested from one of the
+    /// viewer's teams count as requested from the viewer, here and in view rules.
     public func detect(
-        previous: TransitionSnapshot?, current: [PullRequest], viewer: String, views: [SavedView], now: Date
+        previous: TransitionSnapshot?, current: [PullRequest], viewer: String, views: [SavedView], now: Date,
+        viewerTeams: Set<String> = []
     ) -> (events: [PREvent], snapshot: TransitionSnapshot) {
         var snapshot = TransitionSnapshot(takenAt: now, viewer: viewer)
         for pr in current { snapshot.pullRequests[pr.id] = pr }
+        let filterContext = FilterContext(
+            viewer: viewer, viewerTeams: viewerTeams,
+            classification: ClassificationContext(now: now, guardCheckPatterns: guardCheckPatterns, queueDrops: previous?.queueDrops ?? [:])
+        )
+        let teams = filterContext.viewerTeams
         var members: [UUID: Set<String>] = [:]
         for view in views {
-            let ids = Set(current.filter { view.matches($0, viewer: viewer) }.map(\.id))
+            let ids = Set(current.filter { view.matches($0, in: filterContext) }.map(\.id))
             members[view.id] = ids
             snapshot.viewMembers[view.id.uuidString] = ids
             snapshot.viewRules[view.id.uuidString] = view.rule
@@ -136,7 +147,7 @@ public struct TransitionDetector: Sendable {
 
         var events: [PREvent] = []
         for pr in current {
-            let candidates = transitions(from: previous.pullRequests[pr.id], to: pr, viewer: viewer, now: now, snapshot: &snapshot)
+            let candidates = transitions(from: previous.pullRequests[pr.id], to: pr, viewer: viewer, teams: teams, now: now, snapshot: &snapshot)
             for (kind, detail) in candidates {
                 guard let view = views.first(where: { $0.notify.contains(kind) && members[$0.id]?.contains(pr.id) == true }) else { continue }
                 events.append(PREvent(kind: kind, pr: pr, viewID: view.id, viewName: view.name, occurredAt: now, detail: detail))
@@ -146,8 +157,10 @@ public struct TransitionDetector: Sendable {
         for view in views where view.notify.contains(.newMatch) {
             let key = view.id.uuidString
             guard let before = previous.viewMembers[key], previous.viewRules[key] == view.rule else { continue }
-            let gained = (members[view.id] ?? []).subtracting(before)
-            for pr in current where gained.contains(pr.id) {
+            // Members that were drafts last time weren't announced, so they can be new now.
+            let announcedBefore = before.filter { previous.pullRequests[$0]?.isDraft != true }
+            let gained = (members[view.id] ?? []).subtracting(announcedBefore)
+            for pr in current where gained.contains(pr.id) && !pr.isDraft {
                 events.append(PREvent(kind: .newMatch, pr: pr, viewID: view.id, viewName: view.name, occurredAt: now, detail: EventDetail(actor: pr.author)))
             }
         }
@@ -156,12 +169,12 @@ public struct TransitionDetector: Sendable {
 
     /// The event kinds one PR went through between two polls.
     private func transitions(
-        from old: PullRequest?, to pr: PullRequest, viewer: String, now: Date, snapshot: inout TransitionSnapshot
+        from old: PullRequest?, to pr: PullRequest, viewer: String, teams: Set<String>, now: Date, snapshot: inout TransitionSnapshot
     ) -> [(EventKind, EventDetail)] {
         guard let old else {
             // A PR that just opened: only a review request from me is worth a banner here;
             // "new PR in this view" comes from view membership.
-            return pr.requestsReview(from: viewer) && !pr.isAuthored(by: viewer)
+            return pr.requestsReview(from: viewer, orTeams: teams) && !pr.isAuthored(by: viewer)
                 ? [(.reviewRequested, EventDetail(actor: pr.author))] : []
         }
         var result: [(EventKind, EventDetail)] = []
@@ -182,7 +195,7 @@ public struct TransitionDetector: Sendable {
             let wasRunning = old.currentChecks.map { !$0.running.isEmpty } ?? false
             let newHead = oldChecks.headSHA != pr.headSHA || old.headSHA != pr.headSHA
             if wasRunning || newHead {
-                result.append(ciOutcome(pr, checks: checks, viewer: viewer, now: now, snapshot: snapshot))
+                result.append(ciOutcome(pr, checks: checks, viewer: viewer, teams: teams, now: now, snapshot: snapshot))
             }
         }
 
@@ -198,16 +211,16 @@ public struct TransitionDetector: Sendable {
         } else if old.reviewDecision != .changesRequested, pr.reviewDecision == .changesRequested {
             result.append((.changesRequested, EventDetail()))
         }
-        if pr.requestsReview(from: viewer), !old.requestsReview(from: viewer), !pr.isAuthored(by: viewer) {
+        if pr.requestsReview(from: viewer, orTeams: teams), !old.requestsReview(from: viewer, orTeams: teams), !pr.isAuthored(by: viewer) {
             result.append((.reviewRequested, EventDetail(actor: pr.author)))
         }
         return result
     }
 
     private func ciOutcome(
-        _ pr: PullRequest, checks: CheckSummary, viewer: String, now: Date, snapshot: TransitionSnapshot
+        _ pr: PullRequest, checks: CheckSummary, viewer: String, teams: Set<String>, now: Date, snapshot: TransitionSnapshot
     ) -> (EventKind, EventDetail) {
-        let context = ClassificationContext(now: now, guardCheckPatterns: guardCheckPatterns, queueDrops: snapshot.queueDrops)
+        let context = ClassificationContext(now: now, guardCheckPatterns: guardCheckPatterns, queueDrops: snapshot.queueDrops, viewerTeams: teams)
         let start = checks.checks.compactMap(\.startedAt).min()
         let end = checks.checks.compactMap(\.completedAt).max()
         let duration = start.flatMap { s in end.map { $0.timeIntervalSince(s) } }

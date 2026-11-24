@@ -61,6 +61,22 @@ enum GitHubQueries {
     }
     """
 
+    /// The teams in one organization that `login` belongs to. `teams` needs the `read:org`
+    /// scope (classic tokens) or the organization Members read permission (fine-grained
+    /// tokens and GitHub Apps); without it GitHub answers with an INSUFFICIENT_SCOPES error.
+    /// A login that is a user rather than an organization answers NOT_FOUND.
+    static let viewerTeams = """
+    query($org: String!, $login: String!, $cursor: String) {
+      \(rateLimitFields)
+      organization(login: $org) {
+        teams(first: 100, after: $cursor, userLogins: [$login]) {
+          pageInfo { hasNextPage endCursor }
+          nodes { slug }
+        }
+      }
+    }
+    """
+
     /// How many PRs go in one check-detail query.
     static let checkBatchSize = 15
 

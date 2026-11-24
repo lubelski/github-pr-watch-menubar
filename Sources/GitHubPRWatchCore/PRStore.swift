@@ -115,6 +115,18 @@ public final class PRStore {
         }
     }
 
+    /// Whether "review requested from my teams" can work.
+    public enum TeamAccess: Equatable, Sendable {
+        /// Not asked yet.
+        case unknown
+        /// The token reads team membership.
+        case available
+        /// The token lacks `read:org` (or the Members permission). Only requests by name count.
+        case missingScope
+        /// The last attempt failed for another reason. Earlier teams, if any, are kept.
+        case failed(String)
+    }
+
     /// One lane and its PRs.
     public struct LaneGroup: Identifiable, Equatable, Sendable {
         public var lane: Lane
@@ -152,6 +164,10 @@ public final class PRStore {
     public private(set) var rateLimit: RateLimit?
     /// The most recent events, newest last, up to 50.
     public private(set) var recentEvents: [PREvent] = []
+    /// The viewer's teams in the watched repos' organizations, as lowercased `org/slug`.
+    /// A review requested from one of them counts as requested from the viewer.
+    public private(set) var viewerTeams: Set<String> = []
+    public private(set) var teamAccess: TeamAccess = .unknown
 
     /// Global notification settings. Change with `setNotificationSettings`.
     public private(set) var notificationSettings: NotificationSettings
@@ -185,6 +201,11 @@ public final class PRStore {
     @ObservationIgnored private var nextDelay: TimeInterval?
     @ObservationIgnored private var policy: PollPolicy
     @ObservationIgnored private var queueDropDebouncer = QueueDropDebouncer()
+    @ObservationIgnored private var teamsCheckedAt: Date?
+    @ObservationIgnored private var teamsCheckedOrgs: Set<String> = []
+
+    /// How long team membership is cached before it's asked again.
+    public static let teamRefreshInterval: TimeInterval = 6 * 3600
 
     public init(dependencies: PRStoreDependencies) {
         self.dependencies = dependencies
@@ -216,8 +237,22 @@ public final class PRStore {
 
     /// PRs that match the view, in lane order.
     public func pullRequests(in viewID: UUID?) -> [ClassifiedPR] {
-        guard let login = viewer?.login, let view = views.first(where: { $0.id == viewID }) else { return [] }
-        return pullRequests.filter { view.matches($0.pr, viewer: login) }
+        guard let context = filterContext, let view = views.first(where: { $0.id == viewID }) else { return [] }
+        return pullRequests.filter { view.matches($0.pr, in: context) }
+    }
+
+    /// What rules are evaluated against: the viewer, their teams, and the lanes as classified.
+    public var filterContext: FilterContext? {
+        guard let login = viewer?.login else { return nil }
+        return FilterContext(
+            viewer: login, viewerTeams: viewerTeams,
+            lanes: Dictionary(pullRequests.map { ($0.id, $0.info.lane) }, uniquingKeysWith: { a, _ in a }),
+            classification: classificationContext
+        )
+    }
+
+    private var classificationContext: ClassificationContext {
+        ClassificationContext(now: dependencies.now(), guardCheckPatterns: config.guardCheckPatterns, queueDrops: queueDrops, viewerTeams: viewerTeams)
     }
 
     /// The four lanes for a view, always all four and in order, each sorted for its lane.
@@ -246,9 +281,9 @@ public final class PRStore {
 
     /// PRs in any menubar view, each once.
     public var menuBarPullRequests: [ClassifiedPR] {
-        guard let login = viewer?.login else { return [] }
+        guard let context = filterContext else { return [] }
         let menuViews = menuBarViews
-        return pullRequests.filter { pr in menuViews.contains { $0.matches(pr.pr, viewer: login) } }
+        return pullRequests.filter { pr in menuViews.contains { $0.matches(pr.pr, in: context) } }
     }
 
     /// The menubar badge: PRs in the menubar views whose lane is "Your move".
@@ -313,6 +348,10 @@ public final class PRStore {
         pullRequests = []
         rawPullRequests = []
         repoChoices = []
+        viewerTeams = []
+        teamAccess = .unknown
+        teamsCheckedAt = nil
+        teamsCheckedOrgs = []
         lastUpdated = nil
         connection = .idle
         recentEvents = []
@@ -476,6 +515,7 @@ public final class PRStore {
                 login = fetched.login
             }
             guard let login else { return }
+            await refreshTeamsIfNeeded(api: api, login: login)
 
             let light = try await api.openPullRequests(in: watchedRepos)
             let watched = Set(watchedRepos.map { $0.lowercased() })
@@ -483,7 +523,8 @@ public final class PRStore {
             // Keep PRs from repos that failed this time, so they don't look closed.
             let carried = rawPullRequests.filter { failed.contains($0.repo.lowercased()) && watched.contains($0.repo.lowercased()) }
 
-            let needDetail = light.pullRequests.filter { pr in views.contains { $0.rule.mightMatch(pr, viewer: login) } }
+            let lightContext = FilterContext(viewer: login, viewerTeams: viewerTeams, classification: classificationContext)
+            let needDetail = light.pullRequests.filter { pr in views.contains { $0.rule.mightMatch(pr, in: lightContext) } }
             let details = needDetail.isEmpty ? [:] : try await api.checkDetails(for: needDetail)
             let current = light.pullRequests.map { pr -> PullRequest in
                 var pr = pr
@@ -493,7 +534,7 @@ public final class PRStore {
 
             let now = dependencies.now()
             let detector = TransitionDetector(guardCheckPatterns: config.guardCheckPatterns)
-            let (events, newSnapshot) = detector.detect(previous: snapshot, current: current, viewer: login, views: views, now: now)
+            let (events, newSnapshot) = detector.detect(previous: snapshot, current: current, viewer: login, views: views, now: now, viewerTeams: viewerTeams)
             snapshot = newSnapshot
             try? dependencies.snapshot.save(newSnapshot)
             queueDrops = newSnapshot.queueDrops
@@ -532,8 +573,27 @@ public final class PRStore {
     /// Re-runs classification, such as after a view changed. No network.
     public func reclassify() {
         guard let login = viewer?.login else { pullRequests = []; return }
-        let context = ClassificationContext(now: dependencies.now(), guardCheckPatterns: config.guardCheckPatterns, queueDrops: queueDrops)
-        pullRequests = PRClassifier.classify(rawPullRequests, viewer: login, context: context)
+        pullRequests = PRClassifier.classify(rawPullRequests, viewer: login, context: classificationContext)
+    }
+
+    /// Asks GitHub for the viewer's teams when the watched organizations changed or the
+    /// cache is older than `teamRefreshInterval`. Never fails the poll: without access,
+    /// "review requested from my teams" falls back to requests by name.
+    private func refreshTeamsIfNeeded(api: any GitHubAPI, login: String) async {
+        let orgs = Set(watchedRepos.compactMap { $0.split(separator: "/").first.map { $0.lowercased() } })
+        let now = dependencies.now()
+        if orgs == teamsCheckedOrgs, let checked = teamsCheckedAt, now.timeIntervalSince(checked) < Self.teamRefreshInterval { return }
+        do {
+            let memberships = try await api.viewerTeams(login: login, organizations: orgs.sorted())
+            viewerTeams = memberships.teams
+            teamAccess = memberships.missingScope ? .missingScope : .available
+            teamsCheckedAt = now
+            teamsCheckedOrgs = orgs
+        } catch is CancellationError {
+        } catch {
+            // Try again next poll; keep what we had.
+            teamAccess = .failed(Self.describe(error))
+        }
     }
 
     // MARK: Settings
