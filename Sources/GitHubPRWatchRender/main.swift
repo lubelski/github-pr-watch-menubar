@@ -155,6 +155,8 @@ for dark in [false, true] {
 }
 // The menu bar item, the popover in each state, and each Settings section.
 try await MenuBarRenders.renderAll(to: outputDirectory)
+// The view editor sheet in each state.
+try await renderViewEditor()
 print("your move: \(watching.yourMoveCount)")
 
 /// Wraps an API and reports some repos as unreadable, for the "can't read" banner.

@@ -357,6 +357,16 @@ public struct PullRequest: Codable, Sendable, Equatable, Hashable, Identifiable 
     public func requestsReview(from login: String) -> Bool {
         reviewRequests.contains { $0.userLogin?.caseInsensitiveCompare(login) == .orderedSame }
     }
+
+    /// Requested from `login` by name, or from one of `teams` (lowercased `org/slug`).
+    public func requestsReview(from login: String, orTeams teams: Set<String>) -> Bool {
+        reviewRequests.contains { request in
+            switch request {
+            case .user(let user): user.caseInsensitiveCompare(login) == .orderedSame
+            case .team(let team): teams.contains(team.lowercased())
+            }
+        }
+    }
 }
 
 /// GitHub's GraphQL point budget, read from `rateLimit` on every query.
