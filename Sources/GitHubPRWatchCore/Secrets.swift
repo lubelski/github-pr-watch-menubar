@@ -17,7 +17,7 @@ public enum SecretKeys {
 
 /// Generic-password items under the app's own service name.
 public struct KeychainSecrets: SecretStore {
-    public static let service = "dev.lubelski.GitHubPRWatch"
+    public static let service = AppIdentity.bundleIdentifier
 
     public init() {}
 

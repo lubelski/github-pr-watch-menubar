@@ -27,7 +27,7 @@ Setup is one screen: sign in, pick starter views, optionally turn on notificatio
 | Method | Where the token lives |
 |---|---|
 | **Your GitHub CLI login** (offered first when `gh` is installed) | Nowhere in this app. It runs `gh auth token` each time it needs one, so `gh auth refresh` and `gh auth switch` keep working. `gh` is found on `PATH`, then in `/opt/homebrew/bin`, `/usr/local/bin` and `~/.local/bin`. |
-| **Sign in with GitHub** (OAuth device flow) | The Keychain, service `dev.lubelski.GitHubPRWatch`. Hidden until an OAuth client ID is set in `OAuthConfig.clientID`. |
+| **Sign in with GitHub** (OAuth device flow) | The Keychain, service `dev.lubelski.github-pr-watch-menubar` (the bundle identifier). Hidden until an OAuth client ID is set in `OAuthConfig.clientID`. |
 | **A pasted token** | The Keychain, same service. |
 
 **Team review requests** need the `read:org` scope (or, for fine-grained tokens and GitHub Apps, the organization Members read permission). With it, a review requested from one of your teams counts as requested from you, in the "Your move" lane and in rules that say "review requested is me or my teams". Without it the app counts requests to you by name only and the view editor says so. `gh auth refresh -s read:org` adds the scope to a GitHub CLI login. Team membership is read once per watched organization and cached for six hours.
@@ -50,12 +50,18 @@ A check whose name contains `required-commit` is treated as a guard: when it is 
 Runs on macOS 27 or later. Requires Xcode 27 (for the macOS 27 SDK and SwiftUI macros). `xcode-select` doesn't need to point at it; the scripts set `DEVELOPER_DIR`.
 
 ```sh
-./scripts/bundle.sh       # builds build/GitHub PR Watch.app
+./scripts/bundle.sh       # builds build/github-pr-watch-menubar.app, launches nothing
 ./scripts/render.sh       # draws the UI with placeholder data to build/renders/*.png
 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 ```
 
 Run the app from the bundle that `bundle.sh` builds, not with `swift run`. `swift build` records the wrong SDK version in the binary, and macOS then runs the app in a compatibility mode. The comments in `scripts/bundle.sh` explain.
+
+The app follows the scheme the owner's other Mac apps share (`mac-os-agent` is the reference):
+
+- **Names.** The repo, the executable, the `.app` folder, the data folder, and the bundle identifier `dev.lubelski.github-pr-watch-menubar` all use the repo name. People see "GitHub PR Watch" in the menu bar, the title bar, the app menu, and notifications.
+- **Version.** `CFBundleShortVersionString` is the latest `v*` tag without the `v` (or `PRWATCH_VERSION`, or `0.1` before the first release). `CFBundleVersion` is the commit count, which Sparkle compares. `PRWatchGitCommit` is the short hash, with `-dirty` for uncommitted changes. Settings, Debugging shows all three.
+- **Signing.** `bundle.sh` signs with `PRWATCH_SIGNING_IDENTITY`, else a Developer ID Application certificate in the Keychain, else a `github-pr-watch-menubar development` certificate if one exists, else ad hoc. With Developer ID it adds the hardened runtime and a secure timestamp, which notarization needs. Sparkle's helpers are signed one at a time, innermost first. The app needs no entitlements.
 
 ### Icons
 
@@ -77,11 +83,82 @@ The app icon is `Resources/AppIcon.icon`, an Icon Composer file that `bundle.sh`
 
 The mark is based on the [Octicons](https://github.com/primer/octicons) `git-pull-request` icon (MIT), redrawn in code.
 
-Settings, views and the last snapshot live in `~/Library/Application Support/GitHub PR Watch/` as `config.json`, `views.json` and `snapshot.json`.
+Settings, views and the last snapshot live in `~/Library/Application Support/github-pr-watch-menubar/` as `config.json`, `views.json` and `snapshot.json`. Settings, Debugging has Show Data Folder.
+
+## Updating
+
+Release builds update themselves with [Sparkle 2](https://sparkle-project.org). The feed is `appcast.xml` on the latest GitHub Release, `https://github.com/lubelski/github-pr-watch-menubar/releases/latest/download/appcast.xml`, and updates are signed with the key pair the owner's other apps share. Its public half is `scripts/sparkle-public-key.txt`.
+
+- Only a release build has the feed. `scripts/release.sh` passes it and the public key to `bundle.sh`, which writes `SUFeedURL` and `SUPublicEDKey` into Info.plist. A plain `bundle.sh` build never updates itself, so a development copy is never replaced by a release.
+- It checks about once a day, downloads the update, and relaunches into it as soon as the app is idle: no window open, not in front, no sign-in under way, and no poll running. Until then the update waits. The rule is `AppUpdates` in Core, with tests.
+- **Check for Updates…** is in the app menu (shown while the main window is open) and in Settings, Advanced, beside the version and the **Update automatically** switch.
+- `Sources/github-pr-watch-menubar/AppUpdater.swift` is the only file that imports Sparkle.
+
+## Releasing
+
+Pushing to `main` is what ships, once the repo is in [mac-app-release-poller](https://github.com/lubelski/mac-app-release-poller): it watches `main`, runs the checks, has a model review the diff, picks the version, and runs `scripts/release.sh` in its own clone. Nobody runs the release script by hand in normal use.
+
+```sh
+scripts/release.sh --check          # says whether this Mac can release now. Changes nothing.
+scripts/release.sh 0.1.0 --dry-run  # builds the zip and feed into build/release. Publishes nothing.
+scripts/release.sh 0.1.0            # builds, notarizes, tags v0.1.0, and publishes. Only when the owner asks.
+```
+
+`release.sh` refuses to run unless the tree is clean and `HEAD` is `origin/main`. It signs with Developer ID and the hardened runtime, notarizes with the App Store Connect API key named in `~/.appstoreconnect/notary.conf` (or the `AIMeter` notarytool keychain profile), staples, zips, writes `appcast.xml` with Sparkle's `generate_appcast`, tags `v<version>`, and publishes a GitHub Release with the zip and the feed. The comments at the top of the script list the one-time setup.
+
+To add this repo to the poller, add this section to `mac-app-release-poller/config.ini`:
+
+```ini
+[repo github-pr-watch-menubar]
+clone_url = https://github.com/lubelski/github-pr-watch-menubar.git
+github = lubelski/github-pr-watch-menubar
+description = a read-only menu bar app with a main window that watches GitHub pull requests in chosen repos and sends native notifications when one needs the user; it never writes to GitHub
+# The render tool, docs, and icon scripts do not ship in the app.
+shipping_paths =
+    Sources/GitHubPRWatchCore/
+    Sources/GitHubPRWatchUI/
+    Sources/github-pr-watch-menubar/
+    Resources/
+    Package.swift
+    Package.resolved
+    scripts/bundle.sh
+    scripts/release.sh
+    scripts/sparkle-public-key.txt
+# The tests open no window. They use in-memory stores and secrets, fake GitHub APIs,
+# temporary folders, and throwaway UserDefaults suites. No Keychain, no network.
+checks =
+    swift build
+    swift test
+# The same check as mac-os-agent.
+preflight =
+    scripts/release.sh --check
+release = scripts/release.sh {version}
+clean_keep =
+    .build
+# AGENTS.md holds the product rules, such as read-only toward GitHub, and README.md how
+# sign-in works (it runs gh auth token), which could otherwise look like risks.
+decisions =
+    AGENTS.md
+    README.md
+```
+
+Then, from `mac-app-release-poller`, following "Adding a repo" in its README. Installing is live machine configuration and needs the owner's approval:
+
+```sh
+/usr/bin/python3 poller.py --dry-run --repo github-pr-watch-menubar
+/usr/bin/python3 poller.py --mark-seen --repo github-pr-watch-menubar
+./install.sh
+```
+
+The repo has no release tag yet, so the poller's first release is `0.1.0` (`first_version` in its config). `--mark-seen` records the current `main` as already decided, so the first release comes from the next change to `main`. Skip it, or release by hand with `--approve <commit> --repo github-pr-watch-menubar`, to ship the current `main` as the first release.
 
 ## Layout
 
 - `Sources/GitHubPRWatchCore`: everything testable, no UI.
+  - `AppIdentity.swift`: the bundle identifier, data folder, and repo names.
+  - `AppUpdates.swift`, `BuildInfo.swift`: when an update may relaunch the app, and which build this is.
+  - `Experiments.swift`: the `Experiment` switches. None yet.
+  - `Diagnostics.swift`: what Settings, Debugging shows and Copy Diagnostics copies, with no token, login, or repo names.
   - `Models.swift`: `PullRequest`, `CheckRun`, `Repo`, `Viewer`, and GitHub's enums.
   - `PRStatus.swift`: the classifier. Its doc comment has the decision table.
   - `Filter.swift`: the rule tree, `SavedView`, `EventKind`, and the starter views.
@@ -97,6 +174,6 @@ Settings, views and the last snapshot live in `~/Library/Application Support/Git
   - `PRStore.swift`: the `@Observable` app model that the UI reads.
   - `SampleData.swift`: placeholder PRs and a static API for renders and tests.
 - `Sources/GitHubPRWatchUI`: the SwiftUI views and `UserNotifier`. One file per feature.
-- `Sources/GitHubPRWatch`: the `App` and its scenes, nothing else.
+- `Sources/github-pr-watch-menubar`: the `App` and its scenes, and `AppUpdater`, the one file that imports Sparkle.
 - `Sources/GitHubPRWatchRender`: the windowless render tool.
 - `Tests/GitHubPRWatchCoreTests`: tests for Core.

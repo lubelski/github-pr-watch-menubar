@@ -46,6 +46,24 @@ func renderWindow<V: View>(
     print("wrote \(file.path)")
 }
 
+/// A build as `scripts/bundle.sh` stamps it, with placeholder values, so the Debugging and
+/// Advanced renders don't show the render tool's own empty Info.plist.
+let placeholderBuild = BuildInfo(
+    version: "0.1.0", build: "57", commit: "abc1234", bundleIdentifier: AppIdentity.bundleIdentifier,
+    signing: "Signed ad hoc", updates: false)
+let placeholderReleaseBuild = BuildInfo(
+    version: "0.1.0", build: "57", commit: "abc1234", bundleIdentifier: AppIdentity.bundleIdentifier,
+    signing: "Signed by team TEAM000000", updates: true)
+
+/// An updater that is available, as in a release build. It never checks anything.
+@MainActor
+final class PreviewUpdater: AppUpdating {
+    var isAvailable: Bool { true }
+    var canCheck: Bool { true }
+    var updatesAutomatically = true
+    func checkForUpdates() {}
+}
+
 /// Each Settings section as the whole Settings window, with its sidebar and title bar.
 @MainActor
 func renderSettings(watching: PRStore, signedOut: PRStore, notifier: RecordingNotifier) async throws {
@@ -53,10 +71,26 @@ func renderSettings(watching: PRStore, signedOut: PRStore, notifier: RecordingNo
     for dark in [false, true] {
         for tab in SettingsTab.allCases {
             try await renderWindow(
-                "settings-\(tab.rawValue)", SettingsView(store: watching, notifier: notifier, tab: tab),
+                "settings-\(tab.rawValue)", SettingsView(store: watching, notifier: notifier, build: placeholderBuild, tab: tab),
                 size: size, dark: dark, toolbarStyle: .automatic
             )
         }
+        try await renderWindow(
+            "settings-advanced-release",
+            SettingsView(store: watching, notifier: notifier, updater: PreviewUpdater(), build: placeholderReleaseBuild, tab: .advanced),
+            size: size, dark: dark, toolbarStyle: .automatic
+        )
+        // Debugging is taller than the window, so it is also drawn alone, at full length.
+        try render(
+            "settings-debugging-full",
+            SettingsPane(store: watching, notifier: notifier, build: placeholderBuild, tab: .debugging),
+            size: CGSize(width: SettingsView.idealSize.width - SettingsView.sidebarWidth, height: 920), dark: dark
+        )
+        try await renderWindow(
+            "settings-debugging-signed-out",
+            SettingsView(store: signedOut, notifier: notifier, build: placeholderBuild, tab: .debugging),
+            size: size, dark: dark, toolbarStyle: .automatic
+        )
         try await renderWindow(
             "settings-account-signed-out", SettingsView(store: signedOut, notifier: notifier, tab: .account),
             size: size, dark: dark, toolbarStyle: .automatic
